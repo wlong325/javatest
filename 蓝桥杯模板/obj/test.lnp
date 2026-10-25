@@ -1,0 +1,8 @@
+".\obj\main.obj",
+".\obj\ds1302.obj",
+".\obj\iic.obj",
+".\obj\onewire.obj",
+".\obj\ultrasonic.obj",
+".\obj\uart.obj" 
+TO ".\obj\test" 
+PRINT(".\test.m51") RAMSIZE(256) 

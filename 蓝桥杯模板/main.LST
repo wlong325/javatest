@@ -1,0 +1,1231 @@
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 1   
+
+
+C51 COMPILER V9.56.0.0, COMPILATION OF MODULE MAIN
+OBJECT MODULE PLACED IN .\obj\main.obj
+COMPILER INVOKED BY: E:\Keil_v5\C51\BIN\C51.EXE main.c OPTIMIZE(8,SPEED) BROWSE INCDIR(.\Driver) DEBUG OBJECTEXTEND TABS
+                    -(2) OBJECT(.\obj\main.obj)
+
+line level    source
+
+   1          /*******************************************************************************
+   2           * À¶ÇÅ±­µ¥Æ¬»úÍ¨ÓÃÄ£°å
+   3           *
+   4           * Ê¹ÓÃË¼Â·£º
+   5           * 1. PCA µÄ CCF1 ²úÉú 1ms ÏµÍ³½ÚÅÄ£¬Ö»¸ºÔğ¸ø¸÷Ä£¿éÈÎÎñ¼ÆÊı¡£
+   6           * 2. PCA µÄ CCF2 ¹Ì¶¨Ë¢ĞÂ LED¡¢ÊıÂë¹Ü¡¢¼ÌµçÆ÷/·äÃùÆ÷£¬±£Ö¤ÏÔÊ¾ÎÈ¶¨¡£
+   7           * 3. while(1) ÀïÖ»×öÒµÎñ£º°´¼ü¡¢ÏÔÊ¾ÄÚÈİ¡¢Ä£¿é²ÉÑù¡¢Âß¼­ÅĞ¶Ï¡¢´®¿Ú´¦Àí¡£
+   8           * 4. Ö÷Ñ­»·²»ÒªÖ±½Ó²Ù×÷ P0/P2/74HC573£»Ö»ĞŞ¸Ä led¡¢seg[]¡¢b_and_r ÕâĞ©Ó°×Ó±äÁ¿¡£
+   9           * 5. ĞÂÌâÀ´ÁËÓÅÏÈ¸Ä Display_Proc¡¢Key_Proc¡¢Logic_Proc¡¢Uart_Proc¡£
+  10           ******************************************************************************/
+  11          
+  12          #include "STC15F2K60S2.h"
+  13          #include "ds1302.h"
+  14          #include "iic.h"
+  15          #include "onewire.h"
+  16          #include "ultrasonic.h"
+  17          #include "uart.h"
+  18          
+  19          /********************************* ¿Éµ÷ÖÜÆÚÇø *********************************
+  20           * µ¥Î»¶¼ÊÇ ms¡£ÏµÍ³½ÚÅÄÔÚ PCA CCF1 ÖĞÃ¿ 1ms ¼ÓÒ»´Î¡£
+  21           * ÏÔÊ¾É¨Ãè²»×ßÕâĞ©ÈÎÎñÖÜÆÚ£¬ËüÓÉ PCA CCF2 ¶ÀÁ¢¸ßËÙË¢ĞÂ¡£
+  22           ******************************************************************************/
+  23          #define KEY_TASK_TIME         10      // °´¼üÉ¨Ãè/Ïû¶¶ÖÜÆÚ£¬Í¨³£ 10ms
+  24          #define RTC_TASK_TIME         300     // DS1302 ¶ÁÈ¡ÖÜÆÚ£¬300~1000ms ¶¼¿ÉÒÔ
+  25          #define PCF8591_TASK_TIME     50      // ADC/DAC ´¦ÀíÖÜÆÚ£¬µçÎ»Æ÷/¹âÃô½¨Òé 50ms ×óÓÒ
+  26          #define DS18B20_TASK_TIME     250     // ÎÂ¶È¶ÁÈ¡ÖÜÆÚ£¬ÎÂ¶È±ä»¯Âı£¬250~500ms ¼´¿É
+  27          #define NE555_TASK_TIME       1000    // ÆµÂÊ²âÁ¿ÖÜÆÚ£¬³£ÓÃ 1s Õ¢ÃÅ
+  28          #define ULTRASONIC_TASK_TIME  200     // ³¬Éù²¨²â¾àÖÜÆÚ£¬½¨Òé 150~300ms
+  29          #define SEND_TASK_TIME  2000   // Ö÷¶¯ÉÏ±¨ÖÜÆÚ£º2 Ãë·¢Ò»Ìõ
+  30          #define UART_IDLE_TIME        10      // ´®¿Ú²»¶¨³¤½ÓÊÕ£º³¬¹ı 10ms ÎŞĞÂ×Ö½ÚÈÏÎªÒ»Ö¡½áÊø
+  31          #define LED_BLINK_TIME        200     // LEDÉÁË¸Ä£°åÖÜÆÚ£¬200ms ·­×ªÒ»´Î£¬Ğ§¹ûÔ¼Îª 0.2s ÉÁË¸
+  32          #define UART_MULTI_CMD_ENABLE 0       // Á¬ĞøÃüÁî±¸ÓÃ¿ª¹Ø£º0=ÆÕÍ¨µ¥ÃüÁî£¬1=Ö§³Ö (D,2500)(T,235950) ÕâÀàÁ¬Ğ
+             -øÅäÖÃÃüÁî
+  33          #define EEPROM_BASE_ADDR      0x00    // EEPROM²ÎÊı±£´æÆğÊ¼µØÖ·£¬¿É°´ÌâÄ¿×ÔĞĞµ÷Õû
+  34          #define EEPROM_MAGIC          0x5A    // EEPROMÓĞĞ§Êı¾İ±ê¼Ç£¬ÓÃÀ´ÅĞ¶ÏÊÇ·ñÒÑ¾­±£´æ¹ı²ÎÊı
+  35          
+  36          /* PCA ¶¨Ê±ÖÜÆÚ£¬µ¥Î» us¡£
+  37           * CCF1 = 1ms ÏµÍ³½ÚÅÄ£»CCF2 = ÊıÂë¹ÜÉ¨Ãè½ÚÅÄ¡£
+  38           * CCF2 Ğ¡ÓÚ CCF1£¬8 Î»ÊıÂë¹ÜÃ¿Î»Ô¼ 0.666ms£¬ÕûÆÁÔ¼ 5.3ms£¬ÏÔÊ¾±È½ÏÎÈ¡£
+  39           */
+  40          #define TIME_CCAP1 1000
+  41          #define TIME_CCAP2 666
+  42          
+  43          /********************************* ¶ÎÂëÓëË÷Òı *********************************
+  44           * seg[] Àï´æµÄ²»ÊÇ¶ÎÂë£¬¶øÊÇÏÂÃæ Code[] µÄÏÂ±ê¡£
+  45           * 0~15: 0~F
+  46           * 16~31: 0.~F.£¬¼´´øĞ¡Êıµã
+  47           * 32: Ö»ÓĞĞ¡Êıµã
+  48           * 33: '-'
+  49           * 34: ¿Õ°×
+  50           * 35~37: n¡¢L¡¢P£¬¿É°´ÌâÄ¿¼ÌĞøÀ©Õ¹×Ö¿â
+  51           ******************************************************************************/
+  52          #define SEG_DOT      32
+  53          #define SEG_DASH     33
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 2   
+
+  54          #define SEG_BLANK    34
+  55          #define SEG_N        35
+  56          #define SEG_L        36
+  57          #define SEG_P        37
+  58          
+  59          unsigned char code Code[38]={
+  60              0XC0,0XF9,0XA4,0XB0,0X99,0X92,0X82,0XF8,0X80,0X90,
+  61              0X88,0X83,0XC6,0XA1,0X86,0X8E,
+  62              0x40,0x79,0x24,0x30,0x19,0x12,0x02,0x78,0x00,0x10,
+  63              0x08,0x03,0x46,0x21,0x06,0x3f,
+  64              0x7F,0xBF,0xFF,0xAB,0xC7,0x8C
+  65          };
+  66          
+  67          /********************************* Ó²¼şÓ°×Ó±äÁ¿ ********************************
+  68           * Ö÷Ñ­»·Ö»¸ÄÕâĞ©±äÁ¿£»PCA CCF2 ÖĞ¶Ï¸ºÔğ°ÑËüÃÇÕæÕıĞ´Èë 74HC573¡£
+  69           ******************************************************************************/
+  70          unsigned char led = 0x00;                                    // bit=1 ±íÊ¾¶ÔÓ¦ LED ÁÁ
+  71          unsigned char b_and_r = 0x00;                                // bit4 ¼ÌµçÆ÷£¬bit6 ·äÃùÆ÷
+  72          unsigned char seg[8]={SEG_BLANK,SEG_BLANK,SEG_BLANK,SEG_BLANK,SEG_BLANK,SEG_BLANK,SEG_BLANK,SEG_BLANK};
+  73          unsigned char SEG_Count = 0;                                 // µ±Ç°É¨Ãèµ½µÚ¼¸Î»ÊıÂë¹Ü
+  74          
+  75          /********************************* Ä£¿éÊı¾İ»º´æ ********************************
+  76           * ¸÷Ä£¿é¶Áµ½µÄÊı¾İÏÈ·ÅÔÚÕâÀï£¬ÏÔÊ¾ºÍÒµÎñÂß¼­Ö»¶ÁÈ¡»º´æ¡£
+  77           ******************************************************************************/
+  78          unsigned char rtc[3] = {23,59,50};                           // DS1302£ºÊ±¡¢·Ö¡¢Ãë
+  79          unsigned char adc[5] = {0,0,0,0,128};                        // PCF8591£º[0]ÓÒ²àADC£¬[1]¹âÃô£¬[2]ÔË·Å£¬[3]
+             -µçÎ»Æ÷£¬[4]DAC
+  80          unsigned int pot_mv = 0;                                      // µçÎ»Æ÷ÊäÈëµçÑ¹£¬µ¥Î» mV£¬·¶Î§Ô¼ 0~5000
+  81          unsigned int light_mv = 0;                                    // ¹âÃôµç×èÊäÈëµçÑ¹£¬µ¥Î» mV£¬·¶Î§Ô¼ 0~5000
+  82          unsigned int dac_mv = 2500;                                   // DACÏ£ÍûÊä³öµÄµçÑ¹£¬µ¥Î» mV£¬Ä¬ÈÏÔ¼ 2.50V
+  83          long int ds18b20 = 22;                                       // ÎÂ¶È£¬µ¥Î»£ºÉãÊÏ¶ÈÕûÊı
+  84          unsigned int ne555 = 0;                                      // NE555 ÆµÂÊ£¬µ¥Î» Hz£¬1s Õ¢ÃÅÊ±Ö±½ÓµÈÓÚ¼ÆÊı
+             -Öµ
+  85          unsigned int wave = 0;                                       // ³¬Éù²¨¾àÀë£¬µ¥Î»Ô¼ cm£¬Çı¶¯ºÍ CCF0 ÅäºÏ¸üĞ
+             -Â
+  86          
+  87          /********************************* °´¼ü±äÁ¿ ************************************/
+  88          unsigned char key_val = 0;                                   // µ±Ç°°´¼üÖµ
+  89          unsigned char key_old = 0;                                   // ÉÏÒ»´Î°´¼üÖµ
+  90          unsigned char key_down = 0;                                  // °´ÏÂË²¼ä£¬Ö»±£³ÖÒ»ÂÖ
+  91          unsigned char key_up = 0;                                    // ËÉ¿ªË²¼ä£¬Ö»±£³ÖÒ»ÂÖ
+  92          
+  93          /********************************* Ò³ÃæÓëÒµÎñ±äÁ¿ *******************************/
+  94          unsigned char mode = 0;                                      // µ±Ç°Ò³Ãæ£¬°´ÌâÄ¿¶¨Òå
+  95          unsigned char mode_old = 255;                                // ÓÃÓÚÅĞ¶ÏÊÇ·ñ¸ÕÇĞ»»Ò³Ãæ
+  96          unsigned int demo_threshold = 1000;                          // Ê¾ÀıãĞÖµ£¬ĞÂÌâ¿ÉÉ¾³ı/¸ÄÃû
+  97          bit alarm_flag = 0;                                          // Ê¾Àı±¨¾¯±êÖ¾£¬ĞÂÌâ°´ĞèÇó¸Ä
+  98          bit uart_report_flag = 0;                                    // Ö÷¶¯Òì³£ÉÏ±¨±êÖ¾£ºLogic_Proc() ÖÃ1£¬Uart_R
+             -eport_Proc() ·¢ËÍºóÇå0
+  99          unsigned int uart_report_code = 500;                         // Ö÷¶¯ÉÏ±¨´íÎóÂë£¬°´ÌâÄ¿¸Ä³É 500/501/502 µÈ
+ 100          bit eeprom_save_flag = 0;                                    // ÖÃ1ºóÔÚÖ÷Ñ­»·±£´æ²ÎÊı£¬±ÜÃâÔÚ°´¼ü´¦ÀíÖĞÖ±½
+             -ÓĞ´EEPROM
+ 101          bit eeprom_load_flag = 0;                                    // ÖÃ1ºóÔÚÖ÷Ñ­»·¶ÁÈ¡²ÎÊı
+ 102          
+ 103          /********************************* ÈÎÎñ¼ÆÊıÆ÷ **********************************/
+ 104          unsigned char KEY_Task = 0;
+ 105          unsigned int  RTC_Task = 0;
+ 106          unsigned char PCF8591_Task = 0;
+ 107          unsigned char DS18B20_Task = 0;
+ 108          unsigned int  NE555_Task = 0;
+ 109          unsigned char ULTRASONIC_Task = 0;
+ 110          unsigned int  Send_Task = 0;   // Ö÷¶¯ÉÏ±¨¼ÆÊıÆ÷
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 3   
+
+ 111          unsigned char UART_Idle_Task = 0;
+ 112          unsigned char LED_Blink_Task = 0;                             // LEDÉÁË¸¼ÆÊ±£¬1ms ÏµÍ³½ÚÅÄÀÛ¼Óµ½ LED_BLINK
+             -_TIME ºó·­×ª
+ 113          bit led_blink_flag = 0;                                       // LEDÉÁË¸×´Ì¬Î»£¬1=±¾´ÎÓ¦¸ÃµãÁÁ£¬0=±¾´ÎÓ¦¸Ã
+             -Ï¨Ãğ
+ 114          
+ 115          /********************************* ´®¿Ú»º³åÇø **********************************
+ 116           * B_TX1_busy = 255 ±íÊ¾·¢ËÍ¿ÕÏĞ£»·Ç 255 ±íÊ¾ÕıÔÚÓÉ´®¿ÚÖĞ¶ÏÖğ×Ö½Ú·¢ËÍ¡£
+ 117           * B_RX1_flag = 1 ±íÊ¾Ò»Ö¡½ÓÊÕÍê³É£¬Ö÷Ñ­»·¿É½âÎö RX1_Buffer¡£
+ 118           ******************************************************************************/
+ 119          #define TX1_LENGTH 80
+ 120          #define RX1_LENGTH 80
+ 121          xdata char TX1_Buffer[TX1_LENGTH];
+ 122          xdata char RX1_Buffer[RX1_LENGTH];
+ 123          unsigned char B_TX1_busy = 255;
+ 124          unsigned char B_RX1_Con = 0;
+ 125          bit B_RX1_flag = 0;
+ 126          
+ 127          /********************************* PCA ±äÁ¿ ************************************/
+ 128          unsigned int TIME_1 = TIME_CCAP1;
+ 129          unsigned int TIME_2 = TIME_CCAP2;
+ 130          
+ 131          /********************************* º¯ÊıÉùÃ÷ ************************************/
+ 132          void System_Init(void);
+ 133          void HC573_Write(unsigned char channel,unsigned char dat);
+ 134          void Display_Clear(void);
+ 135          void Display_Proc(void);
+ 136          void Key_Proc(void);
+ 137          void Task_Proc(void);
+ 138          void Logic_Proc(void);
+ 139          void Led_Proc(void);
+ 140          void Relay_Buzz_Proc(void);
+ 141          void Uart_Proc(void);
+ 142          void Uart_Report_Proc(void);
+ 143          bit Uart_ParseOneCommand(unsigned char start,unsigned char end,unsigned char reply_enable);
+ 144          void Uart_SendString(char *str);
+ 145          void Uart_ClearRxBuffer(void);
+ 146          void Uart_TxClear(void);
+ 147          void Uart_TxStart(void);
+ 148          void Uart_TxPutChar(unsigned char *idx,char dat);
+ 149          void Uart_TxPutString(unsigned char *idx,char *str);
+ 150          void Uart_TxPut2Digit(unsigned char *idx,unsigned char dat);
+ 151          void Uart_TxPutUInt(unsigned char *idx,unsigned int dat);
+ 152          void Uart_TxPutVoltage(unsigned char *idx,unsigned int mv);
+ 153          bit Uart_Parse4Digit(unsigned char start,unsigned int *value);
+ 154          void EEPROM_LoadParams(void);
+ 155          void EEPROM_SaveParams(void);
+ 156          void Timer0Init(void);
+ 157          void Timer1Init(void);
+ 158          void PCA_TIME_init(void);
+ 159          unsigned char Key_Read(void);
+ 160          long int DS18B20_ToIntC(unsigned int raw);
+ 161          
+ 162          /********************************* Ö÷º¯Êı **************************************/
+ 163          void main(void)
+ 164          {
+ 165   1          System_Init();
+ 166   1      
+ 167   1          while(1)
+ 168   1          {
+ 169   2              Display_Proc();       // Ö»ĞŞ¸Ä seg[]£¬²»ÒªĞ´ P0/P2
+ 170   2              Key_Proc();           // 10ms °´¼üÉ¨Ãè£¬²úÉú key_down/key_up
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 4   
+
+ 171   2              Task_Proc();          // °´ÖÜÆÚ¶ÁÈ¡ RTC/ADC/ÎÂ¶È/ÆµÂÊ/³¬Éù²¨
+ 172   2              Logic_Proc();         // °´ÌâÄ¿Ğ´ÅĞ¶Ï¡¢¼ÆËã¡¢±¨¾¯µÈÒµÎñÂß¼­
+ 173   2              Led_Proc();           // Ö»ĞŞ¸Ä led
+ 174   2              Relay_Buzz_Proc();    // Ö»ĞŞ¸Ä b_and_r
+ 175   2              Uart_Proc();          // ´®¿Ú½ÓÊÕ½âÎö¡¢·¢ËÍ×éÖ¯
+ 176   2              Uart_Report_Proc();   // Ö÷¶¯Òì³£ÉÏ±¨£»²»ÓÃÊ±¿ÉÖ±½Ó×¢ÊÍµôÕâÒ»ĞĞ
+ 177   2          }
+ 178   1      }
+ 179          
+ 180          /********************************* ³õÊ¼»¯ **************************************/
+ 181          void System_Init(void)
+ 182          {
+ 183   1          HC573_Write(4,0xff);      // LED È«Ãğ£º°åÉÏ LED Í¨³£µÍµçÆ½µãÁÁ£¬ËùÒÔĞ´ 0xff
+ 184   1          HC573_Write(5,0x00);      // ¼ÌµçÆ÷/·äÃùÆ÷¹Ø±Õ
+ 185   1          HC573_Write(6,0x00);      // Î»Ñ¡ÇåÁã
+ 186   1          HC573_Write(7,0xff);      // ¶ÎÑ¡È«Ãğ
+ 187   1      
+ 188   1          Display_Clear();
+ 189   1          EEPROM_LoadParams();     // ÉÏµçÏÈ³¢ÊÔ¶ÁÈ¡±£´æ¹ıµÄ²ÎÊı£»Ğ£ÑéÊ§°Ü»á±£ÁôÄ¬ÈÏÖµ
+ 190   1          Set_RTC(rtc);             // ±ÈÈüÖĞÈç¹ûÌâÄ¿ÒªÇóÉÏµçÉèÖÃ³õÊ¼Ê±¼ä£¬¾Í±£Áô£»·ñÔò¿É×¢ÊÍ
+ 191   1          Timer0Init();             // T0£ºNE555 ÆµÂÊ¼ÆÊı
+ 192   1          Timer1Init();             // T1£º³¬Éù²¨»Ø²¨¼ÆÊ±£¬ÄÚ²¿Ë³´øÆô¶¯ PCA
+ 193   1          uart_init();              // ´®¿ÚÊ¹ÓÃ T2 ×÷Îª²¨ÌØÂÊ·¢ÉúÆ÷
+ 194   1          EA = 1;
+ 195   1      }
+ 196          
+ 197          /* 74HC573 Ğ´Èëº¯Êı¡£
+ 198           * ¹Ø¼üË³Ğò£ºÏÈ°ÑÊı¾İ·Åµ½ P0£¬ÔÙ´ò¿ª¶ÔÓ¦Ëø´æÆ÷´òÒ»ÅÄ£¬×îºó¹Ø±ÕËø´æÆ÷¡£
+ 199           * ²»½¨ÒéÔÚÖ÷Ñ­»·Ëæ±ãµ÷ÓÃËü£»ÏÔÊ¾Ïà¹ØÓ²¼şË¢ĞÂ¼¯ÖĞ·ÅÔÚ PCA CCF2 ÖĞ¶ÏÀï¡£
+ 200           */
+ 201          void HC573_Write(unsigned char channel,unsigned char dat)
+ 202          {
+ 203   1          P2 &= 0x1f;
+ 204   1          P0 = dat;
+ 205   1          switch(channel)
+ 206   1          {
+ 207   2              case 4: P2 = (P2 & 0x1f) | 0x80; break;  // Y4C£ºLED
+ 208   2              case 5: P2 = (P2 & 0x1f) | 0xa0; break;  // Y5C£º¼ÌµçÆ÷/·äÃùÆ÷
+ 209   2              case 6: P2 = (P2 & 0x1f) | 0xc0; break;  // Y6C£ºÊıÂë¹ÜÎ»Ñ¡
+ 210   2              case 7: P2 = (P2 & 0x1f) | 0xe0; break;  // Y7C£ºÊıÂë¹Ü¶ÎÑ¡
+ 211   2              default: break;
+ 212   2          }
+ 213   1          P2 &= 0x1f;
+ 214   1      }
+ 215          
+ 216          void Display_Clear(void)
+ 217          {
+ 218   1          unsigned char i;
+ 219   1          for(i=0;i<8;i++) seg[i] = SEG_BLANK;
+ 220   1      }
+ 221          
+ 222          /********************************* ÏÔÊ¾ÄÚÈİ ************************************
+ 223           * ÕâÀïÖ»¸ºÔğ¾ö¶¨ seg[0]~seg[7] ÏÔÊ¾Ê²Ã´¡£
+ 224           * ÕæÕıµÄ¶¯Ì¬É¨ÃèÔÚ PCA CCF2 ÖĞ¶ÏÀïÍê³É¡£
+ 225           ******************************************************************************/
+ 226          void Display_Proc(void)
+ 227          {
+ 228   1          if(mode != mode_old)
+ 229   1          {
+ 230   2              mode_old = mode;
+ 231   2              Display_Clear();      // ÇĞ»»Ò³ÃæÊ±ÇåÒ»´Î£¬±ÜÃâÉÏ¸öÒ³Ãæ²ĞÁô
+ 232   2          }
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 5   
+
+ 233   1      
+ 234   1          switch(mode)
+ 235   1          {
+ 236   2              case 0:               // Ê¾ÀıÒ³Ãæ0£ºÏÔÊ¾Ê±¼ä HH-MM-SS
+ 237   2                  seg[0] = rtc[0] / 10;
+ 238   2                  seg[1] = rtc[0] % 10;
+ 239   2                  seg[2] = SEG_DASH;
+ 240   2                  seg[3] = rtc[1] / 10;
+ 241   2                  seg[4] = rtc[1] % 10;
+ 242   2                  seg[5] = SEG_DASH;
+ 243   2                  seg[6] = rtc[2] / 10;
+ 244   2                  seg[7] = rtc[2] % 10;
+ 245   2              break;
+ 246   2      
+ 247   2              case 1:               // Ê¾ÀıÒ³Ãæ1£ºÏÔÊ¾ÎÂ¶ÈºÍµçÎ»Æ÷µçÑ¹ x.xxV
+ 248   2                  seg[0] = SEG_BLANK;
+ 249   2                  if(ds18b20 < 0)
+ 250   2                  {
+ 251   3                      seg[1] = SEG_DASH;
+ 252   3                      seg[2] = (unsigned char)(-ds18b20 / 10);
+ 253   3                      seg[3] = (unsigned char)(-ds18b20 % 10);
+ 254   3                  }
+ 255   2                  else
+ 256   2                  {
+ 257   3                      seg[1] = ds18b20 >= 100 ? (unsigned char)(ds18b20 / 100) : SEG_BLANK;
+ 258   3                      seg[2] = ds18b20 >= 10  ? (unsigned char)(ds18b20 / 10 % 10) : SEG_BLANK;
+ 259   3                      seg[3] = (unsigned char)(ds18b20 % 10);
+ 260   3                  }
+ 261   2                  seg[4] = SEG_DASH;
+ 262   2                  seg[5] = pot_mv / 1000;
+ 263   2                  seg[6] = pot_mv / 100 % 10 + 16;
+ 264   2                  seg[7] = pot_mv / 10 % 10;
+ 265   2              break;
+ 266   2      
+ 267   2              case 2:               // Ê¾ÀıÒ³Ãæ2£ºÏÔÊ¾ NE555 ÆµÂÊ£¬Ç°µ¼ 0 ÏûÒş
+ 268   2                  seg[0] = SEG_N;
+ 269   2                  seg[1] = SEG_DASH;
+ 270   2                  seg[2] = ne555 >= 10000 ? ne555 / 10000 : SEG_BLANK;
+ 271   2                  seg[3] = ne555 >= 1000  ? ne555 / 1000 % 10 : SEG_BLANK;
+ 272   2                  seg[4] = ne555 >= 100   ? ne555 / 100 % 10 : SEG_BLANK;
+ 273   2                  seg[5] = ne555 >= 10    ? ne555 / 10 % 10 : SEG_BLANK;
+ 274   2                  seg[6] = ne555 % 10;
+ 275   2                  seg[7] = SEG_BLANK;
+ 276   2              break;
+ 277   2      
+ 278   2              case 3:               // Ê¾ÀıÒ³Ãæ3£ºÏÔÊ¾³¬Éù²¨¾àÀë
+ 279   2                  seg[0] = SEG_BLANK;
+ 280   2                  seg[1] = SEG_BLANK;
+ 281   2                  seg[2] = SEG_BLANK;
+ 282   2                  seg[3] = wave >= 1000 ? wave / 1000 : SEG_BLANK;
+ 283   2                  seg[4] = wave >= 100  ? wave / 100 % 10 : SEG_BLANK;
+ 284   2                  seg[5] = wave >= 10   ? wave / 10 % 10 : SEG_BLANK;
+ 285   2                  seg[6] = wave % 10;
+ 286   2                  seg[7] = SEG_BLANK;
+ 287   2              break;
+ 288   2      
+ 289   2              default:
+ 290   2                  mode = 0;
+ 291   2              break;
+ 292   2          }
+ 293   1      }
+ 294          
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 6   
+
+ 295          /********************************* ³¤°´/Ë«»÷Ä£°å ********************************
+ 296           * ÏÂÃæÖ»ÊÇ×¢ÊÍÄ£°å£¬Ä¬ÈÏ²»²ÎÓë±àÒë¡£ÌâÄ¿ĞèÒª³¤°´/Ë«»÷Ê±£¬ÔÙ°´Ğè¸´ÖÆµ½±äÁ¿ÇøºÍ Key_Proc()¡£
+ 297           * µ±Ç° Key_Proc() Ã¿ 10ms Ö´ĞĞÒ»´Î£¬ËùÒÔ¼ÆÊıÖµ 100 Ô¼µÈÓÚ 1 Ãë£¬30 Ô¼µÈÓÚ 300ms¡£
+ 298           *
+ 299           * Ò»¡¢ĞèÒª¼Óµ½¡°°´¼ü±äÁ¿¡±ÇøÓòµÄ±äÁ¿Ê¾Àı£º
+ 300           * unsigned char long_key = 0;          // ³¤°´´¥·¢µÄ°´¼üºÅ£¬0±íÊ¾ÎŞ
+ 301           * unsigned int key_hold_cnt = 0;       // µ±Ç°°´¼üÒÑ°´×¡¶à¾Ã£¬µ¥Î»Ô¼10ms
+ 302           * bit long_key_sent = 0;               // ·ÀÖ¹Ò»´Î³¤°´ÖØ¸´´¥·¢
+ 303           *
+ 304           * unsigned char click_key = 0;         // µÈ´ıµÚ¶ş´Îµã»÷µÄ°´¼üºÅ
+ 305           * unsigned char click_wait_cnt = 0;    // Ë«»÷µÈ´ıÊ±¼ä£¬µ¥Î»Ô¼10ms
+ 306           * unsigned char double_key = 0;        // Ë«»÷´¥·¢µÄ°´¼üºÅ£¬0±íÊ¾ÎŞ
+ 307           * bit single_click_flag = 0;           // Èç¹ûÌâÄ¿ÒªÇø·Öµ¥»÷/Ë«»÷£¬¿ÉÓÃËüÑÓ³ÙÈ·ÈÏµ¥»÷
+ 308           *
+ 309           * ¶ş¡¢³¤°´¼ì²âÄ£°å£¬·ÅÔÚ key_old = key_val; ºóÃæ£º
+ 310           * if(key_val != 0)                     // ÓĞ°´¼üÒ»Ö±°´×Å
+ 311           * {
+ 312           *     if(key_hold_cnt < 65535) key_hold_cnt++;
+ 313           *     if(key_hold_cnt >= 100 && long_key_sent == 0) // Ô¼1Ãë³¤°´
+ 314           *     {
+ 315           *         long_key_sent = 1;
+ 316           *         long_key = key_val;          // ÔÚºóÃæ¸ù¾İ long_key Ö´ĞĞ³¤°´¹¦ÄÜ
+ 317           *     }
+ 318           * }
+ 319           * else                                // Ã»ÓĞ°´¼ü£¬Çå³ı³¤°´×´Ì¬
+ 320           * {
+ 321           *     key_hold_cnt = 0;
+ 322           *     long_key_sent = 0;
+ 323           * }
+ 324           *
+ 325           * Èı¡¢Ë«»÷¼ì²âÄ£°å£¬·ÅÔÚ key_down ´¦Àí¸½½ü£º
+ 326           * if(key_down != 0)
+ 327           * {
+ 328           *     if(click_key == key_down && click_wait_cnt > 0)
+ 329           *     {
+ 330           *         double_key = key_down;       // µÚ¶ş´Îµã»÷ÔÚÊ±¼ä´°ÄÚ£¬ÈÏÎªË«»÷
+ 331           *         click_key = 0;
+ 332           *         click_wait_cnt = 0;
+ 333           *         single_click_flag = 0;
+ 334           *     }
+ 335           *     else
+ 336           *     {
+ 337           *         click_key = key_down;        // µÚÒ»´Îµã»÷£¬¿ªÊ¼µÈ´ıµÚ¶ş´Î
+ 338           *         click_wait_cnt = 30;         // Ô¼300msË«»÷´°¿Ú
+ 339           *         single_click_flag = 1;
+ 340           *     }
+ 341           * }
+ 342           *
+ 343           * if(click_wait_cnt > 0)
+ 344           * {
+ 345           *     click_wait_cnt--;
+ 346           *     if(click_wait_cnt == 0 && single_click_flag)
+ 347           *     {
+ 348           *         single_click_flag = 0;       // µ½ÕâÀï²ÅÈ·ÈÏÊÇµ¥»÷£¬²»ÊÇË«»÷
+ 349           *         // ÔÚÕâÀï´¦Àíµ¥»÷ click_key
+ 350           *         click_key = 0;
+ 351           *     }
+ 352           * }
+ 353           *
+ 354           * ËÄ¡¢Ë«¼ü×éºÏ/×éºÏ³¤°´Ä£°å£º
+ 355           * ×¢Òâ£ºÉÏÃæµÄ key_val Ö»ÄÜ±íÊ¾Ò»¸ö°´¼üºÅ£¬²»ÊÊºÏÅĞ¶Ï¡°Á½¸ö¼üÍ¬Ê±°´ÏÂ¡±¡£
+ 356           * Èç¹ûÌâÄ¿ÒªÇó S4+S5 Í¬Ê±°´ÏÂ 1 Ãë£¬ĞèÒª¶îÍâĞ´Ò»¸ö¡°°´¼ü×´Ì¬Î»Í¼¡±º¯Êı¡£
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 7   
+
+ 357           * Î»Í¼Ë¼Ïë£ºÃ¿¸ö°´¼üÕ¼Ò»¸ö bit£¬°´ÏÂÔòÖÃ 1¡£ÀıÈç bit0 ±íÊ¾ S4£¬bit1 ±íÊ¾ S5¡£
+ 358           *
+ 359           * ±äÁ¿Ê¾Àı£º
+ 360           * unsigned char key_map = 0;          // µ±Ç°°´¼üÎ»Í¼
+ 361           * unsigned int combo_cnt = 0;         // ×éºÏ¼ü±£³ÖÊ±¼ä£¬µ¥Î»Ô¼10ms
+ 362           * bit combo_sent = 0;                 // ·ÀÖ¹×éºÏ³¤°´ÖØ¸´´¥·¢
+ 363           * bit combo_45_flag = 0;              // Ê¾Àı£ºS4+S5 Í¬Ê±³¤°´ÊÂ¼ş
+ 364           *
+ 365           * Î»Í¼¶ÁÈ¡º¯ÊıÊ¾Àı£¬°´ÌâÄ¿ĞèÒª×Ô¼º²¹È«¸ü¶à°´¼ü£º
+ 366           * unsigned char Key_Map_Read(void)
+ 367           * {
+ 368           *     unsigned char map = 0;
+ 369           *
+ 370           *     P44=0; P42=1; P35=1;
+ 371           *     P33=1; P32=1;
+ 372           *     if(!P33) map |= 0x01;           // S4
+ 373           *     if(!P32) map |= 0x02;           // S5
+ 374           *
+ 375           *     P44=1; P42=0;
+ 376           *     if(!P33) map |= 0x04;           // S8
+ 377           *     if(!P32) map |= 0x08;           // S9
+ 378           *
+ 379           *     return map;
+ 380           * }
+ 381           *
+ 382           * ×éºÏ³¤°´¼ì²âÊ¾Àı£¬·ÅÔÚ 10ms µÄ Key_Proc() Àï£º
+ 383           * key_map = Key_Map_Read();
+ 384           * if((key_map & 0x03) == 0x03)        // S4 ºÍ S5 Í¬Ê±°´ÏÂ
+ 385           * {
+ 386           *     if(combo_cnt < 65535) combo_cnt++;
+ 387           *     if(combo_cnt >= 100 && combo_sent == 0) // Í¬Ê±°´×¡Ô¼1Ãë
+ 388           *     {
+ 389           *         combo_sent = 1;
+ 390           *         combo_45_flag = 1;          // ÔÚºóÃæ´¦Àí S4+S5 ³¤°´ÊÂ¼ş
+ 391           *     }
+ 392           * }
+ 393           * else
+ 394           * {
+ 395           *     combo_cnt = 0;
+ 396           *     combo_sent = 0;
+ 397           * }
+ 398           *
+ 399           * Ê¹ÓÃÊ¾Àı£º
+ 400           * if(combo_45_flag) { combo_45_flag = 0; ´¦ÀíS4+S5Í¬Ê±³¤°´; }
+ 401           *
+ 402           * Îå¡¢ÊÂ¼şÊ¹ÓÃÊ¾Àı£º
+ 403           * if(long_key == 8) { long_key = 0; ´¦ÀíS8³¤°´; }
+ 404           * if(double_key == 4) { double_key = 0; ´¦ÀíS4Ë«»÷/¶ş´Îµã»÷; }
+ 405           ******************************************************************************/
+ 406          /********************************* °´¼ü´¦Àí ************************************
+ 407           * key_down ÊÇ¡°¸Õ°´ÏÂ¡±µÄË²¼ä£¬ÊÊºÏÇĞ»»Ò³Ãæ¡¢²ÎÊı¼Ó¼õ¡£
+ 408           ******************************************************************************/
+ 409          void Key_Proc(void)
+ 410          {
+ 411   1          if(KEY_Task < KEY_TASK_TIME) return;
+ 412   1          KEY_Task = 0;
+ 413   1      
+ 414   1          key_val = Key_Read();
+ 415   1          key_down = key_val & (key_val ^ key_old);
+ 416   1          key_up = (~key_val) & (key_val ^ key_old);
+ 417   1          key_old = key_val;
+ 418   1      
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 8   
+
+ 419   1          if(key_down == 4)         // S4£ºÇĞ»»Ò³Ãæ
+ 420   1          {
+ 421   2              mode++;
+ 422   2              if(mode > 3) mode = 0;
+ 423   2          }
+ 424   1          else if(key_down == 8)    // S8£ºÊ¾Àı²ÎÊı¼Ó
+ 425   1          {
+ 426   2              demo_threshold += 100;
+ 427   2          }
+ 428   1          else if(key_down == 9)    // S9£ºÊ¾Àı²ÎÊı¼õ
+ 429   1          {
+ 430   2              if(demo_threshold >= 100) demo_threshold -= 100;
+ 431   2          }
+ 432   1          else if(key_down == 12)   // S12£º±£´æÊ¾Àı²ÎÊıµ½ EEPROM
+ 433   1          {
+ 434   2              eeprom_save_flag = 1;
+ 435   2          }
+ 436   1          else if(key_down == 13)   // S13£º´Ó EEPROM ÖØĞÂ¶ÁÈ¡Ê¾Àı²ÎÊı
+ 437   1          {
+ 438   2              eeprom_load_flag = 1;
+ 439   2          }
+ 440   1      }
+ 441          
+ 442          /********************************* ÖÜÆÚÈÎÎñ ************************************
+ 443           * ËùÓĞºÄÊ±Ä£¿é¶¼·ÅÔÚÖ÷Ñ­»·Àï°´ÖÜÆÚÖ´ĞĞ£¬²»Òª·Å½øÖĞ¶Ï¡£
+ 444           ******************************************************************************/
+ 445          void Task_Proc(void)
+ 446          {
+ 447   1          unsigned int raw_temp;
+ 448   1      
+ 449   1          if(RTC_Task >= RTC_TASK_TIME)
+ 450   1          {
+ 451   2              RTC_Task = 0;
+ 452   2              Read_RTC(rtc);
+ 453   2          }
+ 454   1      
+ 455   1          if(PCF8591_Task >= PCF8591_TASK_TIME)
+ 456   1          {
+ 457   2              PCF8591_Task = 0;
+ 458   2              PCF8591_Adc(adc);    // Çı¶¯»áÂÖÁ÷¸üĞÂ adc[0]~adc[3]£¬²»ÊÇÒ»´Î¶ÁÍêËÄÂ·
+ 459   2              pot_mv = (unsigned int)((unsigned long)adc[3] * 5000 / 255);   // µçÎ»Æ÷£ºADÖµ»»ËãÎª 0~5000mV
+ 460   2              light_mv = (unsigned int)((unsigned long)adc[1] * 5000 / 255); // ¹âÃôµç×è£ºADÖµ»»ËãÎª 0~5000mV
+ 461   2              if(dac_mv > 5000) dac_mv = 5000;
+ 462   2              adc[4] = (unsigned char)((unsigned long)dac_mv * 255 / 5000);  // DAC£ºÄ¿±êmV·´ËãÎª 0~255
+ 463   2              PCF8591_Dac(adc[4]);  // ²»ĞèÒª DAC Ê±¿É×¢ÊÍ
+ 464   2          }
+ 465   1      
+ 466   1          if(DS18B20_Task >= DS18B20_TASK_TIME)
+ 467   1          {
+ 468   2              DS18B20_Task = 0;
+ 469   2              raw_temp = rd_temperature();
+ 470   2              ds18b20 = DS18B20_ToIntC(raw_temp);
+ 471   2          }
+ 472   1      
+ 473   1          if(NE555_Task >= NE555_TASK_TIME)
+ 474   1          {
+ 475   2              NE555_Task = 0;
+ 476   2              TR0 = 0;
+ 477   2              ne555 = ((unsigned int)TH0 << 8) | TL0;
+ 478   2              TH0 = 0;
+ 479   2              TL0 = 0;
+ 480   2              TR0 = 1;
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 9   
+
+ 481   2          }
+ 482   1      
+ 483   1          if(ULTRASONIC_Task >= ULTRASONIC_TASK_TIME)
+ 484   1          {
+ 485   2              ULTRASONIC_Task = 0;
+ 486   2              Wave_Recv();
+ 487   2      
+ 488   2          if(Send_Task >= SEND_TASK_TIME)
+ 489   2          {
+ 490   3              unsigned char tx_i = 0;
+ 491   3              Send_Task = 0;
+ 492   3              if(B_TX1_busy != 255) return;
+ 493   3      
+ 494   3              Uart_TxClear();
+ 495   3              Uart_TxPutChar(&tx_i,'S');
+ 496   3              Uart_TxPutChar(&tx_i,',');
+ 497   3              if(ds18b20 < 0)
+ 498   3              {
+ 499   4                  Uart_TxPutChar(&tx_i,'-');
+ 500   4                  Uart_TxPutUInt(&tx_i,(unsigned int)(-ds18b20));
+ 501   4              }
+ 502   3              else
+ 503   3              {
+ 504   4                  Uart_TxPutUInt(&tx_i,(unsigned int)ds18b20);
+ 505   4              }
+ 506   3              Uart_TxPutChar(&tx_i,',');
+ 507   3              Uart_TxPutUInt(&tx_i,light_mv);
+ 508   3              Uart_TxPutChar(&tx_i,',');
+ 509   3              Uart_TxPutUInt(&tx_i,pot_mv);
+ 510   3              Uart_TxPutChar(&tx_i,',');
+ 511   3              Uart_TxPutUInt(&tx_i,ne555);
+ 512   3              Uart_TxPutString(&tx_i,"\r\n");
+ 513   3              Uart_TxStart();
+ 514   3          }
+ 515   2          }
+ 516   1      
+ 517   1          if(eeprom_save_flag)
+ 518   1          {
+ 519   2              eeprom_save_flag = 0;
+ 520   2              EEPROM_SaveParams();
+ 521   2          }
+ 522   1      
+ 523   1          if(eeprom_load_flag)
+ 524   1          {
+ 525   2              eeprom_load_flag = 0;
+ 526   2              EEPROM_LoadParams();
+ 527   2          }
+ 528   1      }
+ 529          
+ 530          
+ 531          /********************************* EEPROM²ÎÊı±£´æ *******************************
+ 532           * AT24C02 µôµç²»¶ªÊ§£¬ÊÊºÏ±£´æãĞÖµ¡¢Ä£Ê½¡¢Ğ£×¼ÖµµÈÉÙÁ¿²ÎÊı¡£
+ 533           * Ä£°åÊ¾Àı±£´æ 6 ¸ö×Ö½Ú£º
+ 534           * [0] Ä§Êõ×Ö EEPROM_MAGIC£¬±íÊ¾ÕâÆ¬ EEPROM ÒÑ¾­Ğ´¹ıÓĞĞ§²ÎÊı¡£
+ 535           * [1][2] demo_threshold£¬¸ß×Ö½ÚÔÚÇ°£¬µÍ×Ö½ÚÔÚºó¡£
+ 536           * [3][4] dac_mv£¬¸ß×Ö½ÚÔÚÇ°£¬µÍ×Ö½ÚÔÚºó¡£
+ 537           * [5] ¼òµ¥Ğ£ÑéºÍ£¬·ÀÖ¹ EEPROM Ëæ»úÖµ±»µ±³ÉÓĞĞ§²ÎÊı¡£
+ 538           *
+ 539           * ĞÂÌâÀ©Õ¹·½·¨£º¼ÌĞøÍù buf[] ºóÃæ¼Ó²ÎÊı£¬Í¬Ê±¸üĞÂĞ£ÑéºÍºÍ¶ÁĞ´³¤¶È¡£
+ 540           ******************************************************************************/
+ 541          void EEPROM_LoadParams(void)
+ 542          {
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 10  
+
+ 543   1          unsigned char buf[6];
+ 544   1          unsigned char sum;
+ 545   1      
+ 546   1          EEPROM_Read(buf,EEPROM_BASE_ADDR,6);
+ 547   1          sum = buf[0] + buf[1] + buf[2] + buf[3] + buf[4];
+ 548   1      
+ 549   1          if(buf[0] == EEPROM_MAGIC && buf[5] == sum)
+ 550   1          {
+ 551   2              demo_threshold = ((unsigned int)buf[1] << 8) | buf[2];
+ 552   2              dac_mv = ((unsigned int)buf[3] << 8) | buf[4];
+ 553   2              if(dac_mv > 5000) dac_mv = 5000;
+ 554   2          }
+ 555   1      }
+ 556          
+ 557          void EEPROM_SaveParams(void)
+ 558          {
+ 559   1          unsigned char buf[6];
+ 560   1      
+ 561   1          if(dac_mv > 5000) dac_mv = 5000;
+ 562   1      
+ 563   1          buf[0] = EEPROM_MAGIC;
+ 564   1          buf[1] = demo_threshold >> 8;
+ 565   1          buf[2] = demo_threshold & 0xff;
+ 566   1          buf[3] = dac_mv >> 8;
+ 567   1          buf[4] = dac_mv & 0xff;
+ 568   1          buf[5] = buf[0] + buf[1] + buf[2] + buf[3] + buf[4];
+ 569   1      
+ 570   1          EEPROM_Write(buf,EEPROM_BASE_ADDR,6);
+ 571   1      }
+ 572          /********************************* ÒµÎñÂß¼­ ************************************
+ 573           * ĞÂÌâµÄ´ó²¿·Ö¼ÆËãºÍ±¨¾¯ÅĞ¶ÏĞ´ÔÚÕâÀï¡£
+ 574           * Ê¾Àı£ºNE555 ³¬¹ıãĞÖµ¾Í±¨¾¯¡£
+ 575           * Ö÷¶¯Òì³£ÉÏ±¨½¨ÒéÖ»ÔÚ¡°Òì³£¸Õ·¢Éú¡±»ò¡°×´Ì¬±ä»¯¡±Ê±ÖÃ uart_report_flag£¬±ÜÃâÃ¿ÂÖÑ­»·¶¼ÖØ¸´·¢ËÍ¡£
+ 576           ******************************************************************************/
+ 577          void Logic_Proc(void)
+ 578          {
+ 579   1          if(ne555 > demo_threshold) alarm_flag = 1;
+ 580   1          else alarm_flag = 0;
+ 581   1      
+ 582   1      //    Ö÷¶¯ÉÏ±¨Ê¹ÓÃÊ¾Àı£º
+ 583   1          if(ne555 > demo_threshold)
+ 584   1          {
+ 585   2               uart_report_code = 500;
+ 586   2               uart_report_flag = 1;
+ 587   2           }
+ 588   1      //    ÕâÀïÄ¬ÈÏ²»×Ô¶¯ÖÃÎ»£¬·ÀÖ¹Ä£°åÉÏµçºóÒ»Ö±Ïò´®¿Ú·¢ËÍÊ¾ÀıÒì³£¡£
+ 589   1          
+ 590   1      }
+ 591          
+ 592          /********************************* LED Óë¼ÌµçÆ÷/·äÃùÆ÷ *************************
+ 593           * ÕâÀïÖ»¸ÄÓ°×Ó±äÁ¿ led / b_and_r£¬²»Ö±½ÓĞ´Ó²¼ş¡£
+ 594           * b_and_r Ğ´Èë 74HC573 µÄÍ¨µÀ 5£ºbit4=¼ÌµçÆ÷£¬bit6=·äÃùÆ÷¡£
+ 595           * ³£ÓÃĞ´·¨£ºb_and_r |= 0x10 ´ò¿ª¼ÌµçÆ÷£»b_and_r |= 0x40 ´ò¿ª·äÃùÆ÷¡£
+ 596           * ¹Ø±ÕÊ±Çå¶ÔÓ¦Î»£ºb_and_r &= ~0x10£»b_and_r &= ~0x40¡£
+ 597           ******************************************************************************/
+ 598          void Led_Proc(void)
+ 599          {
+ 600   1          led = 0x00;
+ 601   1          led |= (1 << mode);       // L1~L4 Ö¸Ê¾µ±Ç°Ò³Ãæ
+ 602   1          if(alarm_flag && led_blink_flag) led |= 0x10; // L5 ±¨¾¯ÉÁË¸µÆ£ºalarm_flag=1 Ê±Ã¿ 0.2s ·­×ªÒ»´Î
+ 603   1      }
+ 604          
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 11  
+
+ 605          void Relay_Buzz_Proc(void)
+ 606          {
+ 607   1          b_and_r = 0x00;
+ 608   1      
+ 609   1          if(alarm_flag)
+ 610   1          {
+ 611   2              b_and_r |= 0x10;          // bit4£º¼ÌµçÆ÷ÎüºÏ
+ 612   2              /* Èç¹ûÌâÄ¿ÒªÇó±¨¾¯Ê±·äÃùÆ÷Ïì£¬¾Í´ò¿ªÏÂÒ»ĞĞ¡£
+ 613   2               * ×¢Òâ·äÃùÆ÷ÊÇ bit6£¬Ò²¾ÍÊÇ 0x40£»²»ÒªºÍ¼ÌµçÆ÷µÄ 0x10 »ìÏı¡£
+ 614   2               */
+ 615   2              // b_and_r |= 0x40;       // bit6£º·äÃùÆ÷ÃùÏì
+ 616   2          }
+ 617   1      }
+ 618          
+ 619          /********************************* ´®¿Ú´¦Àí ************************************
+ 620           * ´®¿ÚÄ£°å²ÉÓÃ¡°ÖĞ¶ÏÊÕ·¢ + Ö÷Ñ­»·½âÎö¡±µÄ½á¹¹£¬ºÍ±ê×¼´ğ°¸Ë¼Â·Ò»ÖÂ¡£
+ 621           *
+ 622           * ½ÓÊÕÁ÷³Ì£º
+ 623           * 1. ´®¿ÚÖĞ¶ÏÃ¿ÊÕµ½ 1 ¸ö×Ö½Ú£¬¾Í·ÅÈë RX1_Buffer£¬²¢°Ñ UART_Idle_Task ÇåÁã¡£
+ 624           * 2. PCA µÄ 1ms ½ÚÅÄ·¢ÏÖ 10ms Ã»ÓĞĞÂ×Ö½Úºó£¬ÖÃ B_RX1_flag=1¡£
+ 625           * 3. Ö÷Ñ­»· Uart_Proc() ¿´µ½ B_RX1_flag=1£¬ÈÏÎªÒ»Ö¡×Ö·û´®½ÓÊÕÍê³É£¬È»ºó½âÎö¡£
+ 626           *
+ 627           * ·¢ËÍÁ÷³Ì£º
+ 628           * 1. Ö÷Ñ­»·ÏÈ°ÑÍêÕû×Ö·û´®·ÅÈë TX1_Buffer¡£
+ 629           * 2. Ğ´ SBUF=TX1_Buffer[0] Æô¶¯·¢ËÍ¡£
+ 630           * 3. ºóĞø×Ö½ÚÓÉ´®¿Ú·¢ËÍÖĞ¶Ï TI ×Ô¶¯Ò»¸öÒ»¸ö·¢³ö¡£
+ 631           *
+ 632           * ÆÕÍ¨Ä£Ê½ÓëÁ¬ĞøÃüÁîÄ£Ê½£º
+ 633           * 1. UART_MULTI_CMD_ENABLE = 0£ºÄ¬ÈÏÄ£Ê½£¬Ò»Ö¡Ö»µ±×÷Ò»ÌõÃüÁî½âÎö£¬×îÍ¨ÓÃÒ²×î°²È«¡£
+ 634           * 2. UART_MULTI_CMD_ENABLE = 1£º±¸ÓÃÄ£Ê½£¬»áÔÚÒ»Ö¡ÀïÑ°ÕÒ¶à×é (...)£¬ÊÊºÏ (D,2500)(T,235950)¡£
+ 635           * 3. Á¬ĞøÃüÁîÄ£Ê½Ö÷ÒªÓÃÓÚ¡°Á¬ĞøÅäÖÃ²ÎÊı¡±£»Èç¹ûÌâÄ¿ÒªÇóÁ¬Ğø²éÑ¯£¬½¨ÒéÔÙÀ©Õ¹·¢ËÍ¶ÓÁĞ»òÆ´½Ó×Ü»Ø¸´¡£
+ 636           *
+ 637           * µ±Ç°Ê¾ÀıÃüÁî£º
+ 638           * ?             -> »Ø¸´ OK\r\n
+ 639           * (T?)          -> ²éÑ¯Ê±¼ä£¬»Ø¸´ (T,HHMMSS)\r\n
+ 640           * (V?)          -> ²éÑ¯µçÎ»Æ÷ºÍ¹âÃôµçÑ¹£¬»Ø¸´ (V,x.xx,x.xx)\r\n
+ 641           * (F?)          -> ²éÑ¯ NE555 ÆµÂÊ£¬»Ø¸´ (F,1234)\r\n
+ 642           * (D,2500)      -> ÉèÖÃ DAC Ä¿±êÊä³ö 2500mV£¬·¶Î§ 0~5000
+ 643           * (T,235950)    -> ÉèÖÃÊ±¼äÎª 23:59:50
+ 644           ******************************************************************************/
+ 645          void Uart_Proc(void)
+ 646          {
+ 647   1          unsigned char rx_len;        // ±¾Ö¡½ÓÊÕµ½µÄÓĞĞ§³¤¶È£¬È¥µôÄ©Î² \r\n ºóÔÙ½âÎö
+ 648   1      
+ 649   1      #if UART_MULTI_CMD_ENABLE
+                  unsigned char pos;           // É¨Ãè RX1_Buffer µÄµ±Ç°Î»ÖÃ
+                  unsigned char start;         // µ±Ç°ÃüÁî×óÀ¨ºÅ '(' µÄÎ»ÖÃ
+                  unsigned char end;           // µ±Ç°ÃüÁîÓÒÀ¨ºÅ ')' µÄÎ»ÖÃ
+                  bit has_cmd = 0;             // ÊÇ·ñÖÁÉÙÕÒµ½Ò»ÌõÍêÕûÃüÁî
+                  bit all_ok = 1;              // Á¬ĞøÃüÁîÈ«²¿³É¹¦²ÅÍ³Ò»»Ø¸´ OK
+              #endif
+ 656   1      
+ 657   1          if(B_RX1_flag == 0) return;  // Ã»ÓĞÍêÕûÒ»Ö¡Ê±Ö±½Ó·µ»Ø£¬Ö÷Ñ­»·¼ÌĞø×öÆäËûÈÎÎñ
+ 658   1          B_RX1_flag = 0;              // ÏÈÇå±êÖ¾£¬·ÀÖ¹Í¬Ò»Ö¡±»ÖØ¸´½âÎö
+ 659   1      
+ 660   1          rx_len = B_RX1_Con;
+ 661   1          while(rx_len > 0 && (RX1_Buffer[rx_len-1] == '\r' || RX1_Buffer[rx_len-1] == '\n'))
+ 662   1          {
+ 663   2              rx_len--;                // ¼æÈİ´®¿ÚÖúÊÖ×Ô¶¯Ìí¼ÓµÄ»Ø³µ»»ĞĞ
+ 664   2          }
+ 665   1          RX1_Buffer[rx_len] = '\0';   // ÈÃ½ÓÊÕÄÚÈİ³ÉÎª C ×Ö·û´®£¬±ãÓÚºóĞøÀ©Õ¹
+ 666   1      
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 12  
+
+ 667   1      #if UART_MULTI_CMD_ENABLE
+                  /* Á¬ĞøÃüÁî±¸ÓÃ½âÎö£º
+                   * ÀıÈçÊÕµ½ (D,2500)(T,235950)£¬ÕâÀï»áÏÈÕÒµ½µÚÒ»¶ÔÀ¨ºÅ£¬ÔÙÕÒµ½µÚ¶ş¶ÔÀ¨ºÅ¡£
+                   * Ã¿ÕÒµ½Ò»ÌõÍêÕûÃüÁî£¬¾Í½»¸ø Uart_ParseOneCommand() Ö´ĞĞ¡£
+                   * reply_enable ´« 0£¬ÊÇÎªÁË±ÜÃâÃ¿ÌõÃüÁî¶¼Á¢¿Ì·¢ËÍ OK£¬µ¼ÖÂ´®¿Ú·¢ËÍÃ¦Ê±ºóÃæµÄ»Ø¸´¶ªÊ§¡£
+                   */
+                  pos = 0;
+                  while(pos < rx_len)
+                  {
+                      if(RX1_Buffer[pos] != '(')      // Á¬ĞøÃüÁî±ØĞë½ô°¤×ÅĞ´³É (...)(...)£¬ÖĞ¼ä»ìÈëÎŞ¹Ø×Ö·û¾Í±¨´í
+                      {
+                          all_ok = 0;
+                          break;
+                      }
+              
+                      start = pos;
+                      while(pos < rx_len && RX1_Buffer[pos] != ')') pos++;
+                      if(pos >= rx_len)              // ÕÒµ½ '(' µ«Ã»ÕÒµ½ ')'£¬ËµÃ÷¸ñÊ½²»ÍêÕû
+                      {
+                          all_ok = 0;
+                          break;
+                      }
+              
+                      end = pos;
+                      has_cmd = 1;
+                      if(Uart_ParseOneCommand(start,end,0) == 0) all_ok = 0;
+                      pos++;                         // Ìø¹ıµ±Ç° ')'£¬¼ÌĞøÕÒÏÂÒ»ÌõÃüÁî
+                  }
+              
+                  if(has_cmd && all_ok) Uart_SendString("OK\r\n");
+                  else Uart_SendString("ERROR\r\n");
+              #else
+ 699   1          /* ÆÕÍ¨µ¥ÃüÁî½âÎö£º
+ 700   1           * ÕâÊÇÄ£°åÄ¬ÈÏÄ£Ê½£¬Âß¼­×îÖ±¹Û£¬²éÑ¯ÃüÁîÒ²ÄÜÁ¢¼´»Ø¸´¡£
+ 701   1           * ºóĞøÈç¹ûÌâÄ¿Ã÷È·ÒªÇóÁ¬ĞøÅäÖÃÃüÁî£¬Ö»ĞèÒª°Ñ UART_MULTI_CMD_ENABLE ¸ÄÎª 1¡£
+ 702   1           */
+ 703   1          if(rx_len > 0) Uart_ParseOneCommand(0,rx_len-1,1);
+ 704   1          else Uart_SendString("ERROR\r\n");
+ 705   1      #endif
+ 706   1      
+ 707   1          Uart_ClearRxBuffer();              // Ò»Ö¡´¦ÀíÍêºóÇå¿Õ½ÓÊÕÇø£¬×¼±¸ÏÂÒ»Ö¡
+ 708   1      }
+ 709          
+ 710          
+ 711          /* Ö÷¶¯Òì³£ÉÏ±¨¡£
+ 712           * ÓÃ·¨£ºLogic_Proc() ÅĞ¶Ïµ½Òì³£ºó£¬Ö»ĞèÒªÉèÖÃ uart_report_code ºÍ uart_report_flag¡£
+ 713           * ±¾º¯Êı·ÅÔÚÖ÷Ñ­»·ÖĞÖ´ĞĞ£¬´®¿Ú¿ÕÏĞÊ±²ÅÕæÕı·¢ËÍ£¬±ÜÃâ´ò¶ÏÕıÔÚ»Ø¸´µÄ²éÑ¯ÃüÁî¡£
+ 714           * Ä¬ÈÏ¸ñÊ½£º[´íÎóÂë,HHMMSS]\r\n£¬ÀıÈç [500,123456]¡£
+ 715           * Èç¹ûÌâÄ¿ÒªÇóĞ¯´ø¸ü¶àÊı¾İ£¬¿ÉÒÔ¼ÌĞøÔÚÕâÀï×·¼Ó×Ö¶Î£¬ÀıÈçÆµÂÊ¡¢ÒºÎ»¡¢×´Ì¬Î»µÈ¡£
+ 716           */
+ 717          void Uart_Report_Proc(void)
+ 718          {
+ 719   1          unsigned char tx_i = 0;
+ 720   1      
+ 721   1          if(uart_report_flag == 0) return;   // Ã»ÓĞÉÏ±¨ÇëÇó£¬Ö±½Ó·µ»Ø
+ 722   1          if(B_TX1_busy != 255) return;       // ´®¿ÚÕıÔÚ·¢ËÍÊ±ÏÈµÈ´ı£¬ÏÂÒ»ÂÖÖ÷Ñ­»·ÔÙÊÔ
+ 723   1      
+ 724   1          uart_report_flag = 0;               // ÏÈÇå±êÖ¾£¬±ÜÃâÍ¬Ò»ÌõÒì³£±»ÖØ¸´·¢ËÍ
+ 725   1      
+ 726   1          Uart_TxClear();
+ 727   1          Uart_TxPutChar(&tx_i,'[');
+ 728   1          Uart_TxPutUInt(&tx_i,uart_report_code);
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 13  
+
+ 729   1          Uart_TxPutChar(&tx_i,',');
+ 730   1          Uart_TxPut2Digit(&tx_i,rtc[0]);
+ 731   1          Uart_TxPut2Digit(&tx_i,rtc[1]);
+ 732   1          Uart_TxPut2Digit(&tx_i,rtc[2]);
+ 733   1          Uart_TxPutString(&tx_i,"]\r\n");
+ 734   1          Uart_TxStart();
+ 735   1      }
+ 736          
+ 737          /* ½âÎöÒ»ÌõÃüÁî¡£
+ 738           * start/end ÊÇÕâÌõÃüÁîÔÚ RX1_Buffer ÀïµÄÆğÖ¹Î»ÖÃ£¬ÆÕÍ¨Ä£Ê½Í¨³£ÊÇ 0 ºÍ rx_len-1¡£
+ 739           * reply_enable = 1£ºµ¥ÃüÁîÄ£Ê½£¬º¯ÊıÄÚ²¿Ö±½Ó»Ø¸´ OK/ERROR/²éÑ¯½á¹û¡£
+ 740           * reply_enable = 0£ºÁ¬ĞøÃüÁîÄ£Ê½£¬Ö»Ö´ĞĞÅäÖÃ²¢·µ»Ø³É¹¦/Ê§°Ü£¬×îºóÓÉ Uart_Proc() Í³Ò»»Ø¸´Ò»´Î¡£
+ 741           * ·µ»ØÖµ£º1 ±íÊ¾ÃüÁî¸ñÊ½ÕıÈ·ÇÒÖ´ĞĞ³É¹¦£»0 ±íÊ¾ÃüÁî²»ÈÏÊ¶»ò²ÎÊı·Ç·¨¡£
+ 742           */
+ 743          bit Uart_ParseOneCommand(unsigned char start,unsigned char end,unsigned char reply_enable)
+ 744          {
+ 745   1          unsigned char tx_i = 0;      // ·¢ËÍ»º³åÇøÏÂ±ê£¬×é°üÊ±´Ó TX1_Buffer[0] ¿ªÊ¼Ğ´
+ 746   1          unsigned char len;           // µ±Ç°ÃüÁî³¤¶È£¬·½±ãÅĞ¶Ï¹Ì¶¨¸ñÊ½
+ 747   1          unsigned int temp_value;      // ÁÙÊ±±£´æ½âÎö³öµÄÊı×Ö²ÎÊı£¬ÀıÈç DAC µÄ 2500
+ 748   1      
+ 749   1          if(end < start) return 0;
+ 750   1          len = end - start + 1;
+ 751   1      
+ 752   1          // Í¨ĞÅ²âÊÔÃüÁî£º´®¿ÚÖúÊÖ·¢ËÍ ?£¬µ¥Æ¬»ú»Ø¸´ OK¡£
+ 753   1          if(len == 1 && RX1_Buffer[start] == '?')
+ 754   1          {
+ 755   2              if(reply_enable) Uart_SendString("OK\r\n");
+ 756   2              return reply_enable ? 1 : 0;   // Á¬ĞøÄ£Ê½Ö»Ö§³ÖÀ¨ºÅÅäÖÃÃüÁî£¬±ÜÃâÎŞ»Ø¸´²éÑ¯±»ÎóÈÏÎª³É¹¦
+ 757   2          }
+ 758   1          // ²éÑ¯Ê±¼äÃüÁî£º(T?)¡£»Ø¸´¸ñÊ½¹Ì¶¨Îª (T,HHMMSS)¡£
+ 759   1          else if(len == 4 && RX1_Buffer[start] == '(' && RX1_Buffer[start+1] == 'T' && RX1_Buffer[start+2] == '
+             -?' && RX1_Buffer[start+3] == ')')
+ 760   1          {
+ 761   2              if(reply_enable)
+ 762   2              {
+ 763   3                  Uart_TxClear();                // Çå¿Õ·¢ËÍ»º³åÇø£¬×¼±¸ÖØĞÂ×é°ü
+ 764   3                  Uart_TxPutString(&tx_i,"(T,"); // ÒÔÏÂ¼¸ĞĞÒÀ´ÎÆ´³ö»Ø¸´×Ö·û´®\r\nUart_TxPut2Digit(&tx_i,rtc[0])
+             -;
+ 765   3                  Uart_TxPut2Digit(&tx_i,rtc[1]);
+ 766   3                  Uart_TxPut2Digit(&tx_i,rtc[2]);
+ 767   3                  Uart_TxPutString(&tx_i,")\r\n");
+ 768   3                  Uart_TxStart();                // Æô¶¯ÖĞ¶Ï·¢ËÍ
+ 769   3                  return 1;
+ 770   3              }
+ 771   2              return 0;
+ 772   2          }
+ 773   1          // ²éÑ¯µçÑ¹ÃüÁî£º(V?)¡£»Ø¸´µçÎ»Æ÷µçÑ¹ºÍ¹âÃôµçÑ¹£¬µ¥Î» V£¬¸ñÊ½ x.xx¡£
+ 774   1          else if(len == 4 && RX1_Buffer[start] == '(' && RX1_Buffer[start+1] == 'V' && RX1_Buffer[start+2] == '
+             -?' && RX1_Buffer[start+3] == ')')
+ 775   1          {
+ 776   2              if(reply_enable)
+ 777   2              {
+ 778   3                  Uart_TxClear();
+ 779   3                  Uart_TxPutString(&tx_i,"(V,");
+ 780   3                  Uart_TxPutVoltage(&tx_i,pot_mv);
+ 781   3                  Uart_TxPutChar(&tx_i,',');
+ 782   3                  Uart_TxPutVoltage(&tx_i,light_mv);
+ 783   3                  Uart_TxPutString(&tx_i,")\r\n");
+ 784   3                  Uart_TxStart();
+ 785   3                  return 1;
+ 786   3              }
+ 787   2              return 0;
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 14  
+
+ 788   2          }
+ 789   1          // ²éÑ¯ÆµÂÊÃüÁî£º(F?)¡£»Ø¸´ NE555 µ±Ç°ÆµÂÊ£¬ÕûÊıĞÎÊ½¡£
+ 790   1          else if(len == 4 && RX1_Buffer[start] == '(' && RX1_Buffer[start+1] == 'F' && RX1_Buffer[start+2] == '
+             -?' && RX1_Buffer[start+3] == ')')
+ 791   1          {
+ 792   2              if(reply_enable)
+ 793   2              {
+ 794   3                  Uart_TxClear();
+ 795   3                  Uart_TxPutString(&tx_i,"(F,");
+ 796   3                  Uart_TxPutUInt(&tx_i,ne555);
+ 797   3                  Uart_TxPutString(&tx_i,")\r\n");
+ 798   3                  Uart_TxStart();
+ 799   3                  return 1;
+ 800   3              }
+ 801   2              return 0;
+ 802   2          }
+ 803   1          // ÉèÖÃ DAC ÃüÁî£º(D,2500)¡£ÕâÀïÖ»½ÓÊÕ 4 Î»Êı×Ö£¬ËùÒÔ·¶Î§Ğ´³É 0000~5000¡£
+ 804   1          else if(len == 8 && RX1_Buffer[start] == '(' && RX1_Buffer[start+1] == 'D' && RX1_Buffer[start+2] == '
+             -,' && RX1_Buffer[start+7] == ')')
+ 805   1          {
+ 806   2              if(Uart_Parse4Digit(start+3,&temp_value) && temp_value <= 5000)
+ 807   2              {
+ 808   3                  dac_mv = temp_value;        // Task_Proc() »á°Ñ dac_mv »»ËãÎª adc[4] ²¢Êä³öµ½ DAC
+ 809   3                  if(reply_enable) Uart_SendString("OK\r\n");
+ 810   3                  return 1;
+ 811   3              }
+ 812   2              else
+ 813   2              {
+ 814   3                  if(reply_enable) Uart_SendString("ERROR\r\n");
+ 815   3                  return 0;
+ 816   3              }
+ 817   2          }
+ 818   1          // ÉèÖÃÊ±¼äÃüÁî£º(T,235950)¡£ÒÀ´Î±íÊ¾ HH MM SS¡£
+ 819   1          else if(len == 10 && RX1_Buffer[start] == '(' && RX1_Buffer[start+1] == 'T' && RX1_Buffer[start+2] == 
+             -',' && RX1_Buffer[start+9] == ')')
+ 820   1          {
+ 821   2              if(RX1_Buffer[start+3]>='0' && RX1_Buffer[start+3]<='9' && RX1_Buffer[start+4]>='0' && RX1_Buffer[
+             -start+4]<='9' &&
+ 822   2                 RX1_Buffer[start+5]>='0' && RX1_Buffer[start+5]<='9' && RX1_Buffer[start+6]>='0' && RX1_Buffer[
+             -start+6]<='9' &&
+ 823   2                 RX1_Buffer[start+7]>='0' && RX1_Buffer[start+7]<='9' && RX1_Buffer[start+8]>='0' && RX1_Buffer[
+             -start+8]<='9')
+ 824   2              {
+ 825   3                  rtc[0] = (RX1_Buffer[start+3]-'0')*10 + (RX1_Buffer[start+4]-'0');
+ 826   3                  rtc[1] = (RX1_Buffer[start+5]-'0')*10 + (RX1_Buffer[start+6]-'0');
+ 827   3                  rtc[2] = (RX1_Buffer[start+7]-'0')*10 + (RX1_Buffer[start+8]-'0');
+ 828   3                  if(rtc[0] < 24 && rtc[1] < 60 && rtc[2] < 60)
+ 829   3                  {
+ 830   4                      Set_RTC(rtc);           // ºÏ·¨²ÅÕæÕıĞ´Èë DS1302
+ 831   4                      if(reply_enable) Uart_SendString("OK\r\n");
+ 832   4                      return 1;
+ 833   4                  }
+ 834   3              }
+ 835   2      
+ 836   2              if(reply_enable) Uart_SendString("ERROR\r\n");
+ 837   2              return 0;
+ 838   2          }
+ 839   1      
+ 840   1          if(reply_enable) Uart_SendString("ERROR\r\n"); // ÃüÁî¸ñÊ½²»ÈÏÊ¶£¬Í³Ò»»Ø¸´ ERROR
+ 841   1          return 0;
+ 842   1      }
+ 843          
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 15  
+
+ 844          /* ·¢ËÍ¹Ì¶¨×Ö·û´®¡£ÊÊºÏ»Ø¸´ "OK\r\n"¡¢"ERROR\r\n" ÕâÖÖ²»ĞèÒªÆ´±äÁ¿µÄÄÚÈİ¡£ */
+ 845          void Uart_SendString(char *str)
+ 846          {
+ 847   1          unsigned char i = 0;
+ 848   1      
+ 849   1          if(B_TX1_busy != 255) return;       // ÉÏÒ»Ö¡»¹Ã»·¢Íê£¬±¾Ö¡·ÅÆú£»ĞèÒªÅÅ¶ÓÊ±¿É×ÔĞĞÀ©Õ¹
+ 850   1          Uart_TxClear();
+ 851   1          while(str[i] != '\0' && i < TX1_LENGTH-1)
+ 852   1          {
+ 853   2              TX1_Buffer[i] = str[i];
+ 854   2              i++;
+ 855   2          }
+ 856   1          TX1_Buffer[i] = '\0';              // ½áÎ²²¹ 0£¬´®¿ÚÖĞ¶Ï¿¿ËüÅĞ¶Ï·¢ËÍ½áÊø
+ 857   1          Uart_TxStart();
+ 858   1      }
+ 859          
+ 860          /* Çå¿Õ½ÓÊÕ»º³åÇø¡£Ã¿´¦ÀíÍêÒ»Ö¡¶¼Òªµ÷ÓÃ£¬·ñÔòÏÂÒ»Ö¡¿ÉÄÜºÍ¾ÉÄÚÈİ»ìÔÚÒ»Æğ¡£ */
+ 861          void Uart_ClearRxBuffer(void)
+ 862          {
+ 863   1          unsigned char i;
+ 864   1          for(i=0;i<RX1_LENGTH;i++) RX1_Buffer[i] = 0;
+ 865   1          B_RX1_Con = 0;                      // ½ÓÊÕÏÂ±ê¹éÁã
+ 866   1          UART_Idle_Task = 0;                 // ¿ÕÏĞ¼ÆÊ±Ò²¹éÁã
+ 867   1      }
+ 868          
+ 869          /* Çå¿Õ·¢ËÍ»º³åÇø¡£ÊÖ¶¯×é°üÇ°ÏÈµ÷ÓÃ£¬±ÜÃâ²ĞÁôÉÏÒ»´Î·¢ËÍÄÚÈİ¡£ */
+ 870          void Uart_TxClear(void)
+ 871          {
+ 872   1          unsigned char i;
+ 873   1          for(i=0;i<TX1_LENGTH;i++) TX1_Buffer[i] = 0;
+ 874   1      }
+ 875          
+ 876          /* Æô¶¯·¢ËÍ¡£Ö»ĞèÒªĞ´µÚÒ»¸ö×Ö½Úµ½ SBUF£¬ºóĞø×Ö½ÚÓÉ TI ÖĞ¶Ï×Ô¶¯·¢ËÍ¡£ */
+ 877          void Uart_TxStart(void)
+ 878          {
+ 879   1          if(B_TX1_busy != 255) return;       // ´®¿ÚÃ¦Ê±²»´ò¶Ïµ±Ç°·¢ËÍ
+ 880   1          if(TX1_Buffer[0] == '\0') return;   // ¿Õ×Ö·û´®²»·¢ËÍ
+ 881   1          SBUF = TX1_Buffer[0];
+ 882   1          B_TX1_busy = 1;                     // ÏÂ´Î TI ÖĞ¶Ï´Ó TX1_Buffer[1] ¿ªÊ¼·¢
+ 883   1      }
+ 884          
+ 885          /* Ïò TX1_Buffer ×·¼Ó 1 ¸ö×Ö·û£¬idx »á×Ô¶¯ºóÒÆ£¬²¢Ê¼ÖÕ²¹ \0 ×÷Îª×Ö·û´®½áÊø¡£ */
+ 886          void Uart_TxPutChar(unsigned char *idx,char dat)
+ 887          {
+ 888   1          if(*idx < TX1_LENGTH-1)
+ 889   1          {
+ 890   2              TX1_Buffer[*idx] = dat;
+ 891   2              (*idx)++;
+ 892   2              TX1_Buffer[*idx] = '\0';        // ±£³Ö»º³åÇøËæÊ±¶¼ÊÇÒ»¸öºÏ·¨×Ö·û´®
+ 893   2          }
+ 894   1      }
+ 895          
+ 896          /* Ïò TX1_Buffer ×·¼ÓÒ»¸ö×Ö·û´®£¬ÀıÈç "(T," »ò ")\r\n"¡£ */
+ 897          void Uart_TxPutString(unsigned char *idx,char *str)
+ 898          {
+ 899   1          while(*str != '\0')
+ 900   1          {
+ 901   2              Uart_TxPutChar(idx,*str);
+ 902   2              str++;
+ 903   2          }
+ 904   1      }
+ 905          
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 16  
+
+ 906          /* ×·¼ÓÁ½Î»Ê®½øÖÆÊı×Ö¡£³£ÓÃÓÚÊ±¼ä£º3 »á±»·¢ËÍ³É 03¡£ */
+ 907          void Uart_TxPut2Digit(unsigned char *idx,unsigned char dat)
+ 908          {
+ 909   1          Uart_TxPutChar(idx,dat/10+'0');
+ 910   1          Uart_TxPutChar(idx,dat%10+'0');
+ 911   1      }
+ 912          
+ 913          /* ×·¼Ó unsigned int£¬²»´øÇ°µ¼ 0¡£³£ÓÃÓÚÆµÂÊ¡¢¼ÆÊıÖµ¡¢ãĞÖµ¡£ */
+ 914          void Uart_TxPutUInt(unsigned char *idx,unsigned int dat)
+ 915          {
+ 916   1          bit started = 0;
+ 917   1          unsigned int div;
+ 918   1      
+ 919   1          for(div=10000; div>0; div/=10)
+ 920   1          {
+ 921   2              if(dat >= div || started || div == 1)
+ 922   2              {
+ 923   3                  started = 1;
+ 924   3                  Uart_TxPutChar(idx,dat/div+'0');
+ 925   3                  dat %= div;
+ 926   3              }
+ 927   2          }
+ 928   1      }
+ 929          
+ 930          /* ×·¼ÓµçÑ¹×Ö·û´®£¬ÊäÈëµ¥Î» mV£¬Êä³ö¸ñÊ½ x.xx£¬ÀıÈç 3260 -> 3.26¡£ */
+ 931          void Uart_TxPutVoltage(unsigned char *idx,unsigned int mv)
+ 932          {
+ 933   1          if(mv > 5000) mv = 5000;
+ 934   1          Uart_TxPutChar(idx,mv/1000+'0');
+ 935   1          Uart_TxPutChar(idx,'.');
+ 936   1          Uart_TxPutChar(idx,mv/100%10+'0');
+ 937   1          Uart_TxPutChar(idx,mv/10%10+'0');
+ 938   1      }
+ 939          
+ 940          /* ´Ó RX1_Buffer[start] ¿ªÊ¼½âÎö 4 Î»Êı×Ö£¬³É¹¦·µ»Ø 1£¬Ê§°Ü·µ»Ø 0¡£ */
+ 941          bit Uart_Parse4Digit(unsigned char start,unsigned int *value)
+ 942          {
+ 943   1          unsigned char i;
+ 944   1          unsigned int v = 0;
+ 945   1      
+ 946   1          for(i=0;i<4;i++)
+ 947   1          {
+ 948   2              if(RX1_Buffer[start+i] < '0' || RX1_Buffer[start+i] > '9') return 0;
+ 949   2              v = v*10 + (RX1_Buffer[start+i]-'0');
+ 950   2          }
+ 951   1          *value = v;
+ 952   1          return 1;
+ 953   1      }
+ 954          /********************************* ¹¤¾ßº¯Êı ************************************/
+ 955          long int DS18B20_ToIntC(unsigned int raw)
+ 956          {
+ 957   1          if(raw & 0xF000)
+ 958   1          {
+ 959   2              if(((raw ^ 0xFFFF) & 0x000F) == 0x000F)
+ 960   2                  return -((long int)((raw ^ 0xFFFF) >> 4)) - 1;
+ 961   2              else
+ 962   2                  return -((long int)((raw ^ 0xFFFF) >> 4));
+ 963   2          }
+ 964   1          return (long int)(raw >> 4);
+ 965   1      }
+ 966          
+ 967          /********************************* ¼üÅÌÉ¨Ãè ************************************
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 17  
+
+ 968           * µ±Ç°±£ÁôÀ¶ÇÅ±­³£ÓÃ¾ØÕó¼üÅÌ²¿·Ö°´¼ü£ºS4/S5/S8/S9/S12/S13¡£
+ 969           * Èç¹ûÌâÄ¿ĞèÒª¸ü¶à°´¼ü£¬È¡ÏûÏÂÃæ×¢ÊÍ²¢²¹È«¶ÔÓ¦ĞĞ¡£
+ 970           ******************************************************************************/
+ 971          unsigned char Key_Read(void)
+ 972          {
+ 973   1          P44=0;P42=1;P35=1;//P34=1;
+ 974   1          P33=1;P32=1;//P30=1;P31=1;
+ 975   1          if(!P33)return 4;
+ 976   1          else if(!P32)return 5;
+ 977   1      //    else if(!P31)return 6;
+ 978   1      //    else if(!P30)return 7;
+ 979   1          P44=1;P42=0;
+ 980   1          if(!P33)return 8;
+ 981   1          else if(!P32)return 9;
+ 982   1      //    else if(!P31)return 10;
+ 983   1      //    else if(!P30)return 11;
+ 984   1          P42=1;P35=0;
+ 985   1          if(!P33)return 12;
+ 986   1          else if(!P32)return 13;
+ 987   1      //    else if(!P31)return 14;
+ 988   1      //    else if(!P30)return 15;
+ 989   1      //    P35=1;P34=0;
+ 990   1      //    if(!P33)return 16;
+ 991   1      //    else if(!P32)return 17;
+ 992   1      //    else if(!P31)return 18;
+ 993   1      //    else if(!P30)return 19;
+ 994   1          return 0;
+ 995   1      }
+ 996          
+ 997          /********************************* ¶¨Ê±Æ÷³õÊ¼»¯ ********************************/
+ 998          void Timer0Init(void)
+ 999          {
+1000   1          AUXR |= 0x80;            // T0 1T Ä£Ê½
+1001   1          TMOD &= 0xF0;
+1002   1          TMOD |= 0x04;            // T0 ¼ÆÊıÆ÷Ä£Ê½£¬NE555 ÊäÈë½Ó T0/P3.4
+1003   1          TL0 = 0;
+1004   1          TH0 = 0;
+1005   1          TF0 = 0;
+1006   1          TR0 = 1;
+1007   1      }
+1008          
+1009          void Timer1Init(void)
+1010          {
+1011   1          AUXR &= 0xBF;            // T1 12T Ä£Ê½£¬ÓÃÓÚ³¬Éù²¨»Ø²¨¼ÆÊ±
+1012   1          TMOD &= 0x0F;
+1013   1          TL1 = 0x00;
+1014   1          TH1 = 0x00;
+1015   1          TF1 = 0;
+1016   1          TR1 = 0;
+1017   1          PCA_TIME_init();
+1018   1      }
+1019          
+1020          void PCA_TIME_init(void)
+1021          {
+1022   1          P_SW1 &= 0xCF;           // PCA Ê¹ÓÃÄ¬ÈÏÒı½Å
+1023   1          CCAPM0 = 0x11;           // CCF0£º³¬Éù²¨²¶»ñ
+1024   1          PPCA = 1;                // Ìá¸ß PCA ÖĞ¶ÏÓÅÏÈ¼¶£¬±£»¤ÏÔÊ¾Ë¢ĞÂÊµÊ±ĞÔ
+1025   1          CMOD = 0x00;             // PCA Ê±ÖÓ Fosc/12
+1026   1          CCON = 0x00;
+1027   1          CH = 0;
+1028   1          CL = 0;
+1029   1      
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 18  
+
+1030   1          CCAP1L = TIME_1;
+1031   1          CCAP1H = TIME_1 >> 8;
+1032   1          CCAPM1 = 0x49;           // CCF1£º±È½ÏÆ¥Åä + ÖĞ¶Ï£¬1ms ÏµÍ³½ÚÅÄ
+1033   1          TIME_1 += TIME_CCAP1;
+1034   1      
+1035   1          CCAP2L = TIME_2;
+1036   1          CCAP2H = TIME_2 >> 8;
+1037   1          CCAPM2 = 0x49;           // CCF2£º±È½ÏÆ¥Åä + ÖĞ¶Ï£¬ÏÔÊ¾Ë¢ĞÂ
+1038   1          TIME_2 += TIME_CCAP2;
+1039   1      
+1040   1          CR = 1;
+1041   1      }
+1042          
+1043          /********************************* ´®¿ÚÖĞ¶Ï ************************************/
+1044          void uart_0(void) interrupt 4
+1045          {
+1046   1          if(RI)
+1047   1          {
+1048   2              RI = 0;
+1049   2              if(B_RX1_Con < RX1_LENGTH-1)
+1050   2              {
+1051   3                  RX1_Buffer[B_RX1_Con] = SBUF;
+1052   3                  B_RX1_Con++;
+1053   3                  UART_Idle_Task = 0;           // ÊÕµ½ĞÂ×Ö½ÚºóÖØĞÂ¼ÆËã¿ÕÏĞÊ±¼ä
+1054   3              }
+1055   2          }
+1056   1      
+1057   1          if(TI)
+1058   1          {
+1059   2              TI = 0;
+1060   2              if(B_TX1_busy != 255 && TX1_Buffer[B_TX1_busy] != '\0')
+1061   2              {
+1062   3                  SBUF = TX1_Buffer[B_TX1_busy]; // ·¢ËÍÏÂÒ»¸ö×Ö½Ú
+1063   3                  B_TX1_busy++;
+1064   3              }
+1065   2              else
+1066   2              {
+1067   3                  B_TX1_busy = 255;             // ·¢ËÍ½áÊø£¬»Ö¸´¿ÕÏĞ×´Ì¬
+1068   3              }
+1069   2          }
+1070   1      }
+1071          
+1072          /********************************* PCA ÖĞ¶Ï ************************************/
+1073          void CCP_IRQHandler(void) interrupt 7
+1074          {
+1075   1          unsigned int t;
+1076   1      
+1077   1          if(CCF0)                 // ³¬Éù²¨»Ø²¨²¶»ñ
+1078   1          {
+1079   2              CCF0 = 0;
+1080   2              if(RX_Wait_FLAG)
+1081   2              {
+1082   3                  TR1 = 0;
+1083   3                  if(TF1)
+1084   3                  {
+1085   4                      TF1 = 0;
+1086   4                      wave = 999;
+1087   4                  }
+1088   3                  else
+1089   3                  {
+1090   4                      t = ((unsigned int)TH1 << 8) | TL1;
+1091   4                      wave = (unsigned int)(t * 0.017); // 12MHz/12T ÏÂ³£ÓÃ½üËÆ»»Ëã£¬µ¥Î» cm
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 19  
+
+1092   4                  }
+1093   3                  RX_Wait_FLAG = 0;
+1094   3              }
+1095   2          }
+1096   1      
+1097   1          if(CCF1)                 // 1ms ÏµÍ³½ÚÅÄ£ºÖ»¼ÆÊı£¬²»Ö´ĞĞºÄÊ±Ä£¿é
+1098   1          {
+1099   2              CCF1 = 0;
+1100   2              CCAP1L = TIME_1;
+1101   2              CCAP1H = TIME_1 >> 8;
+1102   2              TIME_1 += TIME_CCAP1;
+1103   2      
+1104   2              if(KEY_Task < KEY_TASK_TIME) KEY_Task++;
+1105   2              if(RTC_Task < RTC_TASK_TIME) RTC_Task++;
+1106   2              if(PCF8591_Task < PCF8591_TASK_TIME) PCF8591_Task++;
+1107   2              if(DS18B20_Task < DS18B20_TASK_TIME) DS18B20_Task++;
+1108   2              if(NE555_Task < NE555_TASK_TIME) NE555_Task++;
+1109   2              if(ULTRASONIC_Task < ULTRASONIC_TASK_TIME) ULTRASONIC_Task++;
+1110   2              if(Send_Task < SEND_TASK_TIME) Send_Task++;
+1111   2      
+1112   2              /* LEDÉÁË¸Ä£°å£º
+1113   2               * ÕâÀïÖ»¸üĞÂ¡°ÉÁË¸×´Ì¬Î»¡±£¬ÕæÕıµãÁÁÄÄÒ»ÕµµÆÈÔÈ»·ÅÔÚ Led_Proc() Àï¾ö¶¨¡£
+1114   2               * alarm_flag ÇåÁãÊ±Í¬²½¸´Î»£¬±£Ö¤ÏÂ´Î±¨¾¯´ÓÃğµÆ×´Ì¬ÖØĞÂ¿ªÊ¼ÉÁË¸¡£
+1115   2               */
+1116   2              if(alarm_flag)
+1117   2              {
+1118   3                  if(LED_Blink_Task < LED_BLINK_TIME) LED_Blink_Task++;
+1119   3                  else
+1120   3                  {
+1121   4                      LED_Blink_Task = 0;
+1122   4                      led_blink_flag = !led_blink_flag;
+1123   4                  }
+1124   3              }
+1125   2              else
+1126   2              {
+1127   3                  LED_Blink_Task = 0;
+1128   3                  led_blink_flag = 0;
+1129   3              }
+1130   2      
+1131   2              if(B_RX1_Con != 0 && B_RX1_flag == 0)
+1132   2              {
+1133   3                  if(UART_Idle_Task < UART_IDLE_TIME) UART_Idle_Task++;
+1134   3                  else B_RX1_flag = 1;
+1135   3              }
+1136   2          }
+1137   1      
+1138   1          if(CCF2)                 // ¸ßÊµÊ±ÏÔÊ¾Ë¢ĞÂ£ºLED¡¢ÊıÂë¹Ü¡¢¼ÌµçÆ÷/·äÃùÆ÷Í³Ò»ÔÚÕâÀïĞ´Ó²¼ş
+1139   1          {
+1140   2              CCF2 = 0;
+1141   2              CCAP2L = TIME_2;
+1142   2              CCAP2H = TIME_2 >> 8;
+1143   2              TIME_2 += TIME_CCAP2;
+1144   2      
+1145   2              HC573_Write(4,~led);                       // LED£ºled bit=1 ±íÊ¾ÁÁ£¬Ó²¼şµÍµçÆ½µãÁÁ£¬ËùÒÔÈ¡·´
+1146   2              HC573_Write(7,0xff);                       // ÏûÒş£¬·ÀÖ¹Î»ÇĞ»»Ê±´®Ó°
+1147   2              HC573_Write(6,1 << (SEG_Count % 8));       // Î»Ñ¡
+1148   2              HC573_Write(7,Code[seg[SEG_Count % 8]]);   // ¶ÎÑ¡
+1149   2              SEG_Count++;
+1150   2              HC573_Write(5,b_and_r);                    // ¼ÌµçÆ÷/·äÃùÆ÷
+1151   2          }
+1152   1      }
+
+C51 COMPILER V9.56.0.0   MAIN                                                              10/25/2026 21:13:44 PAGE 20  
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   3953    ----
+   CONSTANT SIZE    =     74    ----
+   XDATA SIZE       =    160    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     61      53
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      6       1
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
