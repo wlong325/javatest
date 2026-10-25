@@ -9,15 +9,16 @@
         <result property="author" column="author"/>
         <result property="price" column="price"/>
         <result property="stock" column="stock"/>
+        <result property="createTime" column="create_time"/>
     </resultMap>
 
     <select id="findAll" resultMap="BookResultMap">
-        SELECT id, title, author, price, stock
+        SELECT id, title, author, price, stock, create_time
         FROM book
     </select>
 
     <select id="findById" resultMap="BookResultMap">
-        SELECT id, title, author, price, stock
+        SELECT id, title, author, price, stock, create_time
         FROM book
         WHERE id = #{id}
     </select>

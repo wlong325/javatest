@@ -1,6 +1,7 @@
 package com.example.javatest.entity;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 public class Book {
     private Long id;
@@ -8,6 +9,8 @@ public class Book {
     private String author;
     private BigDecimal price;
     private Integer stock;
+    private LocalDateTime createTime;
+
 
     public Long getId() {
         return id;
@@ -47,5 +50,13 @@ public class Book {
 
     public void setStock(Integer stock) {
         this.stock = stock;
+    }
+
+    public LocalDateTime getCreateTime() {
+        return createTime;
+    }
+
+    public void setCreateTime(LocalDateTime createTime) {
+        this.createTime = createTime;
     }
 }
