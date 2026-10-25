@@ -21,7 +21,7 @@ Target DLL:      STCMON51.DLL V1, 0, 10, 0
 Dialog DLL:      TP51.DLL V2.59.0.0
  
 <h2>Project:</h2>
-E:\javatest\À¶ÇÅ±­Ä£°å\test.uvproj
+E:\javatest\Ó²¼þ²ã\test.uvproj
 Project File Date:  06/03/2026
 
 <h2>Output:</h2>
@@ -33,9 +33,26 @@ compiling onewire.c...
 compiling ultrasonic.c...
 compiling uart.c...
 linking...
-Program Size: data=85.0 xdata=160 code=6317
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_UART_SENDSTRING?MAIN
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_SET_RTC?DS1302
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_READ_RTC?DS1302
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_PCF8591_DAC?IIC
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_EEPROM_READ?IIC
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_EEPROM_WRITE?IIC
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?WAVE_RECV?ULTRASONIC
+*** WARNING L1: UNRESOLVED EXTERNAL SYMBOL
+    SYMBOL:  WAVE
+    MODULE:  .\obj\ultrasonic.obj (ULTRASONIC)
+Program Size: data=76.4 xdata=80 code=3080
 creating hex file from ".\obj\test"...
-".\obj\test" - 0 Error(s), 0 Warning(s).
+".\obj\test" - 0 Error(s), 8 Warning(s).
 Build Time Elapsed:  00:00:01
 </pre>
 </body>
