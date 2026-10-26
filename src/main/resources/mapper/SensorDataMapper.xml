@@ -25,4 +25,14 @@
         LIMIT 1
     </select>
 
+    <!-- 取最近 N 条，按时间正序返回（子查询先倒序取 N 条，再正序排） -->
+    <select id="findHistory" resultMap="SensorDataMap">
+        SELECT id, temperature, light, pot, frequency, create_time
+        FROM (SELECT id, temperature, light, pot, frequency, create_time
+              FROM sensor_data
+              ORDER BY id DESC
+              LIMIT #{limit}) t
+        ORDER BY id ASC
+    </select>
+
 </mapper>

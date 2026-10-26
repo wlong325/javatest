@@ -5,6 +5,8 @@ import com.example.javatest.service.SensorDataService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/sensor")
 public class SensorController {
@@ -21,5 +23,10 @@ public class SensorController {
     @GetMapping("/latest")
     public SensorData latest() {
         return sensorDataService.latest();
+    }
+
+    @GetMapping("/history")
+    public List<SensorData> history(@RequestParam(defaultValue = "100") int limit) {
+        return sensorDataService.history(limit);
     }
 }

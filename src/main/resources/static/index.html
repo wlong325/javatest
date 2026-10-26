@@ -1,6 +1,197 @@
-<html>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CT107D 环境监测台</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        font-family: "Microsoft YaHei", sans-serif;
+        background: #0f1420;
+        color: #e6edf7;
+        min-height: 100vh;
+    }
+    .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 18px 30px;
+        background: rgba(255,255,255,0.04);
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .header h1 { font-size: 22px; letter-spacing: 1px; }
+    .header h1 span { color: #4da3ff; }
+    .status { font-size: 13px; color: #7d8aa0; }
+    .status .dot {
+        display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+        background: #f43f5e; margin-right: 6px; vertical-align: middle;
+    }
+    .status.online .dot { background: #22c55e; }
+    .cards {
+        display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+        padding: 20px 30px;
+    }
+    .card {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.09);
+        border-radius: 10px; padding: 16px 20px;
+    }
+    .card .label { font-size: 13px; color: #7d8aa0; margin-bottom: 6px; }
+    .card .value { font-size: 32px; font-weight: bold; }
+    .card .value small { font-size: 14px; color: #7d8aa0; font-weight: normal; margin-left: 4px; }
+    .card.temp .value { color: #fbbf24; }
+    .card.light .value { color: #34d399; }
+    .card.pot .value { color: #60a5fa; }
+    .card.freq .value { color: #f472b6; }
+    .charts {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+        padding: 0 30px 20px 30px;
+    }
+    .chart-box {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.09);
+        border-radius: 10px; padding: 10px;
+    }
+    .chart { width: 100%; height: 260px; }
+    .table-box {
+        margin: 0 30px 30px 30px;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.09);
+        border-radius: 10px; overflow: hidden;
+    }
+    .table-box h2 { font-size: 15px; padding: 14px 20px; color: #c3d0e2; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 10px 20px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    th { color: #7d8aa0; font-weight: normal; }
+    tr:hover td { background: rgba(255,255,255,0.03); }
+</style>
+</head>
 <body>
-<h1>hello word!!!</h1>
-<p>this is a html page</p>
+
+<div class="header">
+    <h1>CT107D <span>环境监测台</span></h1>
+    <div class="status" id="status"><span class="dot"></span>等待数据</div>
+</div>
+
+<div class="cards">
+    <div class="card temp">
+        <div class="label">温度（DS18B20）</div>
+        <div class="value" id="v-temp">--<small>℃</small></div>
+    </div>
+    <div class="card light">
+        <div class="label">光照（光敏电阻）</div>
+        <div class="value" id="v-light">--<small>V</small></div>
+    </div>
+    <div class="card pot">
+        <div class="label">电位器电压</div>
+        <div class="value" id="v-pot">--<small>V</small></div>
+    </div>
+    <div class="card freq">
+        <div class="label">NE555 频率</div>
+        <div class="value" id="v-freq">--<small>Hz</small></div>
+    </div>
+</div>
+
+<div class="charts">
+    <div class="chart-box"><div class="chart" id="chart-temp"></div></div>
+    <div class="chart-box"><div class="chart" id="chart-light"></div></div>
+    <div class="chart-box"><div class="chart" id="chart-pot"></div></div>
+    <div class="chart-box"><div class="chart" id="chart-freq"></div></div>
+</div>
+
+<div class="table-box">
+    <h2>最近 10 条记录</h2>
+    <table>
+        <thead>
+            <tr><th>时间</th><th>温度 (℃)</th><th>光照 (V)</th><th>电位器 (V)</th><th>频率 (Hz)</th></tr>
+        </thead>
+        <tbody id="tb"></tbody>
+    </table>
+</div>
+
+<script>
+const CHARTS = [
+    { el: 'chart-temp', name: '温度', unit: '℃', field: 'temperature', color: '#fbbf24', min: 0, max: 40 },
+    { el: 'chart-light', name: '光照', unit: 'V', field: 'light', color: '#34d399', min: 0, max: 5 },
+    { el: 'chart-pot', name: '电位器', unit: 'V', field: 'pot', color: '#60a5fa', min: 0, max: 5 },
+    { el: 'chart-freq', name: '频率', unit: 'Hz', field: 'frequency', color: '#f472b6', min: 0, max: null },
+];
+
+const charts = {};
+for (const c of CHARTS) {
+    charts[c.field] = echarts.init(document.getElementById(c.el));
+    charts[c.field].setOption({
+        grid: { left: 50, right: 20, top: 30, bottom: 25 },
+        tooltip: { trigger: 'axis', backgroundColor: 'rgba(15,20,32,0.9)', borderColor: '#334155', textStyle: { color: '#e6edf7' } },
+        xAxis: { type: 'category', data: [], axisLine: { lineStyle: { color: '#334155' } }, axisLabel: { color: '#7d8aa0' } },
+        yAxis: { type: 'value', min: c.min, max: c.max, axisLabel: { color: '#7d8aa0' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,0.07)' } } },
+        series: [{
+            name: c.name + '(' + c.unit + ')', type: 'line', smooth: true, showSymbol: false,
+            data: [], lineStyle: { width: 2, color: c.color },
+            areaStyle: { opacity: 0.15, color: c.color },
+        }],
+    });
+}
+
+function fmtTime(t) {
+    const d = new Date(t);
+    const p = n => String(n).padStart(2, '0');
+    return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+}
+
+function fmt(v, n) {
+    return v === null || v === undefined ? '--' : Number(v).toFixed(n === undefined ? 2 : n);
+}
+
+async function refresh() {
+    try {
+        const [latestRes, historyRes] = await Promise.all([
+            fetch('/api/sensor/latest'),
+            fetch('/api/sensor/history?limit=100'),
+        ]);
+        const latest = await latestRes.json();
+        const history = await historyRes.json();
+
+        // 状态
+        const st = document.getElementById('status');
+        if (latest && latest.temperature !== null) {
+            st.className = 'status online';
+            st.innerHTML = '<span class="dot"></span>在线 · 更新于 ' + fmtTime(latest.createTime);
+        }
+
+        // 最新数据卡片
+        document.getElementById('v-temp').innerHTML = fmt(latest && latest.temperature, 2) + '<small>℃</small>';
+        document.getElementById('v-light').innerHTML = fmt(latest && latest.light, 3) + '<small>V</small>';
+        document.getElementById('v-pot').innerHTML = fmt(latest && latest.pot, 3) + '<small>V</small>';
+        document.getElementById('v-freq').innerHTML = fmt(latest && latest.frequency, 0) + '<small>Hz</small>';
+
+        // 曲线
+        const times = history.map(d => fmtTime(d.createTime));
+        for (const c of CHARTS) {
+            charts[c.field].setOption({
+                xAxis: { data: times },
+                series: [{ data: history.map(d => d[c.field]) }],
+            });
+        }
+
+        // 最近 10 条表格
+        const rows = history.slice(-10).reverse();
+        document.getElementById('tb').innerHTML = rows.map(r =>
+            '<tr><td>' + fmtTime(r.createTime) + '</td>' +
+            '<td>' + fmt(r.temperature, 2) + '</td>' +
+            '<td>' + fmt(r.light, 3) + '</td>' +
+            '<td>' + fmt(r.pot, 3) + '</td>' +
+            '<td>' + fmt(r.frequency, 0) + '</td></tr>'
+        ).join('') || '<tr><td colspan="5" style="color:#7d8aa0">暂无数据，等板子上报…</td></tr>';
+    } catch (e) {
+        document.getElementById('status').innerHTML = '<span class="dot"></span>连接失败';
+    }
+}
+
+refresh();
+setInterval(refresh, 2000);
+</script>
 </body>
 </html>

@@ -6,6 +6,8 @@ import com.example.javatest.service.SensorDataService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 public class SensorDataServiceImpl implements SensorDataService {
 
@@ -20,5 +22,10 @@ public class SensorDataServiceImpl implements SensorDataService {
     @Override
     public SensorData latest() {
         return sensorDataMapper.findLatest();
+    }
+
+    @Override
+    public List<SensorData> history(int limit) {
+        return sensorDataMapper.findHistory(limit);
     }
 }

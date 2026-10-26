@@ -5,9 +5,10 @@
     pip install pyserial requests
     python serial_forward.py [COM口] [波特率] [后端地址]
     例：python serial_forward.py COM6 9600 http://localhost:8080
-板子数据格式（模板 C 代码主动上报）：
-    S,<温度℃>,<光敏mV>,<电位器mV>,<频率Hz>\r\n
-    例：S,22,1800,3200,142
+板子数据格式（模板 C 代码主动上报，均为整数）：
+    S,<温度×100>,<光敏mV>,<电位器mV>,<频率Hz>\r\n
+    例：S,2706,2647,5000,142   （2706=27.06℃，2647mV=2.647V）
+桥负责单位换算：温度÷100→℃，光敏/电位器÷1000→V
 """
 import serial
 import requests
@@ -44,9 +45,9 @@ def main():
                 if m:
                     temp, light, pot, freq = m.groups()
                     payload = {
-                        "temperature": float(temp),
-                        "light": int(light),
-                        "pot": int(pot),
+                        "temperature": float(temp) / 100.0,   # 2706 -> 27.06 ℃
+                        "light": float(light) / 1000.0,       # 2647 -> 2.647 V
+                        "pot": float(pot) / 1000.0,           # 5000 -> 5.000 V
                         "frequency": int(freq),
                     }
                     try:

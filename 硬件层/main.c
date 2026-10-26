@@ -21,6 +21,7 @@
 #define DS18B20_TASK_TIME     250
 #define NE555_TASK_TIME       1000
 #define SEND_TASK_TIME        2000
+#define KEY_TASK_TIME         10
 #define LED_BLINK_TIME        200
 
 #define TIME_CCAP1 1000
@@ -51,6 +52,8 @@ unsigned int ne555 = 0;
 
 /********************************* 业务数据 *********************************/
 unsigned long upload_count = 0;      // 上传成功次数（上电从 0 开始，不保存）
+unsigned int pot_mv_prev = 0;        // 电位器上次原始换算值（偶发0过滤用）
+unsigned int light_mv_prev = 0;      // 光敏上次原始换算值（偶发0过滤用）
 bit tx_ok_flag = 0;                  // 1 = 已发出一帧，等待发送完成
 bit tx_led_on = 0;                   // L1 点亮状态
 unsigned char TX_LED_Task = 0;       // L1 亮灯计时（LED_BLINK_TIME 后熄灭）
@@ -60,6 +63,13 @@ unsigned char PCF8591_Task = 0;
 unsigned char DS18B20_Task = 0;
 unsigned int  NE555_Task = 0;
 unsigned int  Send_Task = 0;
+
+/********************************* 按键与发送使能 ********************************/
+unsigned char key_val = 0;      // 当前按键值
+unsigned char key_old = 0;      // 上一次按键值
+unsigned char key_down = 0;     // 按下瞬间，保持一轮
+unsigned char KEY_Task = 0;     // 按键扫描节流（10ms）
+bit send_enable = 0;            // 0=未启动；按 S4 后置 1
 
 /********************************* 串口发送缓冲 ********************************/
 #define TX1_LENGTH 80
@@ -109,6 +119,7 @@ void main(void)
     while(1)
     {
         Display_Proc();
+        Key_Proc();
         Task_Proc();
         Led_Proc();
     }
@@ -185,13 +196,20 @@ void Task_Proc(void)
 {
     unsigned int raw_temp;
     unsigned char tx_i;
+    unsigned int pot_raw;
+    unsigned int light_raw;
 
     if(PCF8591_Task >= PCF8591_TASK_TIME)
     {
         PCF8591_Task = 0;
         PCF8591_Adc(adc);
-        pot_mv = (unsigned int)((unsigned long)adc[3] * 5000 / 255);
-        light_mv = (unsigned int)((unsigned long)adc[1] * 5000 / 255);
+        pot_raw = (unsigned int)((unsigned long)adc[3] * 5000 / 255);
+        light_raw = (unsigned int)((unsigned long)adc[1] * 5000 / 255);
+        /* B方案：偶发读到 0（IIC 偶发错误）时沿用上次值；连续两次 0 才认为是真实归零 */
+        if(pot_raw != 0 || pot_mv_prev == 0) pot_mv = pot_raw;
+        pot_mv_prev = pot_raw;
+        if(light_raw != 0 || light_mv_prev == 0) light_mv = light_raw;
+        light_mv_prev = light_raw;
     }
 
     if(DS18B20_Task >= DS18B20_TASK_TIME)
@@ -215,6 +233,7 @@ void Task_Proc(void)
     {
         tx_i = 0;
         Send_Task = 0;
+        if(send_enable == 0) return;   /* 未按 S4：不上报 */
         if(B_TX1_busy != 255) return;
 
         Uart_TxClear();
@@ -257,6 +276,38 @@ void Led_Proc(void)
     if(tx_led_on) led |= 0x01;   // L1：发送成功后亮 0.2 秒
 }
 
+/********************************* 按键扫描 ***********************************/
+unsigned char Key_Read(void)
+{
+    P44=0;P42=1;P35=1;
+    P33=1;P32=1;
+    if(!P33)return 4;      /* S4：启动发送 */
+    else if(!P32)return 5; /* S5 */
+    P44=1;P42=0;
+    if(!P33)return 8;      /* S8 */
+    else if(!P32)return 9; /* S9 */
+    P42=1;P35=0;
+    if(!P33)return 12;     /* S12 */
+    else if(!P32)return 13;/* S13 */
+    return 0;
+}
+
+void Key_Proc(void)
+{
+    if(KEY_Task < KEY_TASK_TIME) return;
+    KEY_Task = 0;
+
+    key_val = Key_Read();
+    key_down = key_val & (key_val ^ key_old);
+    key_old = key_val;
+
+    if(key_down == 4)          /* S4：按一次后开始发送 */
+    {
+        send_enable = 1;
+        Send_Task = SEND_TASK_TIME;   /* 立即触发第一帧 */
+    }
+}
+
 /********************************* 串口中断 ***********************************
  * 仅发送方向：TI 中断逐字节发送 TX1_Buffer；RI 丢弃（本机只发不收）。
  ******************************************************************************/
@@ -296,6 +347,7 @@ void CCP_IRQHandler(void) interrupt 7
         if(DS18B20_Task < DS18B20_TASK_TIME) DS18B20_Task++;
         if(NE555_Task < NE555_TASK_TIME) NE555_Task++;
         if(Send_Task < SEND_TASK_TIME) Send_Task++;
+        if(KEY_Task < KEY_TASK_TIME) KEY_Task++;
 
         if(tx_led_on)
         {
@@ -437,12 +489,10 @@ void PCA_TIME_init(void)
 /********************************* 温度换算 ************************************/
 long int DS18B20_ToIntC(unsigned int raw)
 {
-    if(raw & 0xF000)
+    /* 返回温度×100，例 2706 = 27.06℃（DS18B20 每 LSB = 0.0625℃） */
+    if(raw & 0xF000)    /* 负温度（12 位补码） */
     {
-        if(((raw ^ 0xFFFF) & 0x000F) == 0x000F)
-            return -((long int)((raw ^ 0xFFFF) >> 4)) - 1;
-        else
-            return -((long int)((raw ^ 0xFFFF) >> 4));
+        return -((long int)((0x10000 - raw) & 0xFFFF) * 625 / 100);
     }
-    return (long int)(raw >> 4);
+    return (long int)raw * 625 / 100;
 }
