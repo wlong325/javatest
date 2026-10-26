@@ -1,0 +1,22 @@
+### 1. 上报一条传感器数据（模拟板子采集，POST，JSON 放下面）
+### temperature=温度℃(DS18B20)，light=光敏电压mV(PCF8591 ch1)，pot=电位器电压mV(ch3)，frequency=NE555频率Hz
+POST http://localhost:8080/api/sensor
+Content-Type: application/json
+
+{
+  "temperature": 25.50,
+  "light": 1800,
+  "pot": 3200,
+  "frequency": 1234
+}
+
+### 2. 只上报温度（测试字段缺省可空，其余为 NULL）
+POST http://localhost:8080/api/sensor
+Content-Type: application/json
+
+{
+  "temperature": 26.80
+}
+
+### 3. 查询最新一条数据（对应板子最近一次上报）
+GET http://localhost:8080/api/sensor/latest
