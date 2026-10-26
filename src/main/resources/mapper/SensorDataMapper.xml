@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.javatest.mapper.SensorDataMapper">
+
+    <resultMap id="SensorDataMap" type="com.example.javatest.entity.SensorData">
+        <id property="id" column="id"/>
+        <result property="temperature" column="temperature"/>
+        <result property="light" column="light"/>
+        <result property="pot" column="pot"/>
+        <result property="frequency" column="frequency"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.example.javatest.entity.SensorData"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO sensor_data (temperature, light, pot, frequency)
+        VALUES (#{temperature}, #{light}, #{pot}, #{frequency})
+    </insert>
+
+    <select id="findLatest" resultMap="SensorDataMap">
+        SELECT id, temperature, light, pot, frequency, create_time
+        FROM sensor_data
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
+</mapper>
