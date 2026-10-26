@@ -42,3 +42,9 @@ Thumbs.db
 ### 临时文件 ###
 *.tmp
 *.bak
+
+### 运行日志（本机调试产物，不入库） ###
+app_out.txt
+app_err.txt
+bridge_log.txt
+bridge_err.txt
