@@ -61,6 +61,22 @@
         border: 1px solid rgba(255,255,255,0.09);
         border-radius: 10px; overflow: hidden;
     }
+    .control-box {
+        margin: 0 30px 20px 30px;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.09);
+        border-radius: 10px; padding: 14px 20px;
+        display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
+    }
+    .control-box h2 { font-size: 15px; color: #c3d0e2; margin-right: 6px; }
+    .ctrl-group { display: flex; align-items: center; gap: 8px; }
+    .ctrl-label { font-size: 13px; color: #7d8aa0; }
+    .btn { padding: 6px 18px; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; color: #fff; }
+    .btn-on { background: #22c55e; }
+    .btn-on:hover { background: #16a34a; }
+    .btn-off { background: #f43f5e; }
+    .btn-off:hover { background: #e11d48; }
+    .ctrl-status { font-size: 13px; color: #7d8aa0; margin-left: auto; }
     .table-box h2 { font-size: 15px; padding: 14px 20px; color: #c3d0e2; border-bottom: 1px solid rgba(255,255,255,0.08); }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { padding: 10px 20px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); }
@@ -92,6 +108,21 @@
         <div class="label">NE555 频率</div>
         <div class="value" id="v-freq">--<small>Hz</small></div>
     </div>
+</div>
+
+<div class="control-box">
+    <h2>板载控制</h2>
+    <div class="ctrl-group">
+        <span class="ctrl-label">继电器</span>
+        <button class="btn btn-on" onclick="sendCmd('relay','on')">开</button>
+        <button class="btn btn-off" onclick="sendCmd('relay','off')">关</button>
+    </div>
+    <div class="ctrl-group">
+        <span class="ctrl-label">蜂鸣器</span>
+        <button class="btn btn-on" onclick="sendCmd('buzzer','on')">开</button>
+        <button class="btn btn-off" onclick="sendCmd('buzzer','off')">关</button>
+    </div>
+    <div class="ctrl-status" id="dev-status">最近命令：无</div>
 </div>
 
 <div class="charts">
@@ -192,6 +223,38 @@ async function refresh() {
 
 refresh();
 setInterval(refresh, 2000);
+
+// ===== 双向控制：命令下发 + 状态轮询 =====
+async function sendCmd(type, val) {
+    const body = {};
+    body[type] = val;
+    try {
+        const r = await fetch('/api/device/command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        const txt = await r.text();
+        document.getElementById('dev-status').innerHTML = '最近命令：' + txt;
+        refreshDeviceStatus();
+    } catch (e) {
+        document.getElementById('dev-status').innerHTML = '最近命令：发送失败';
+    }
+}
+
+async function refreshDeviceStatus() {
+    try {
+        const r = await fetch('/api/device/status');
+        const s = await r.json();
+        const timeTxt = s.time ? fmtTime(s.time) : '-';
+        const map = { PENDING: '待下发', SENT: '已下发串口' };
+        document.getElementById('dev-status').innerHTML =
+            '最近命令：' + (s.lastCommand || '无') +
+            ' · 状态：' + (map[s.status] || '-') + ' · ' + timeTxt;
+    } catch (e) { /* 后端未启动时静默 */ }
+}
+refreshDeviceStatus();
+setInterval(refreshDeviceStatus, 1000);
 </script>
 </body>
 </html>

@@ -20,15 +20,17 @@ PORT = sys.argv[1] if len(sys.argv) > 1 else "COM6"
 BAUD = int(sys.argv[2]) if len(sys.argv) > 2 else 9600
 BASE = sys.argv[3] if len(sys.argv) > 3 else "http://localhost:8080"
 API = BASE + "/api/sensor"
+DEVICE_API = BASE + "/api/device/pending"
 
 LINE_RE = re.compile(r"^S,(-?\d+),(\d+),(\d+),(\d+)$")
 
 
 def main():
     ser = serial.Serial(PORT, BAUD, timeout=0.2)
-    print(f"[桥] 已打开 {PORT} @ {BAUD}，转发到 {API}（Ctrl+C 退出）")
+    print(f"[桥] 已打开 {PORT} @ {BAUD}，转发到 {API}，下行轮询 {DEVICE_API}（Ctrl+C 退出）")
     buf = ""
     count = 0
+    last_poll = 0
     while True:
         try:
             data = ser.read(ser.in_waiting or 1)
@@ -58,6 +60,19 @@ def main():
                         print(f"[{time.strftime('%H:%M:%S')}] {line} -> 转发失败: {e}")
                 else:
                     print(f"[桥] 忽略非数据行: {line!r}")
+
+        # 下行：每 500ms 轮询一次后端待下发命令，取到就写串口（命令格式 R1/R0/B1/B0）
+        now = time.time()
+        if now - last_poll >= 0.5:
+            last_poll = now
+            try:
+                r = requests.get(DEVICE_API, timeout=2)
+                cmd = r.json().get("cmd", "")
+                if cmd:
+                    ser.write((cmd + "\r\n").encode("utf-8"))
+                    print(f"[{time.strftime('%H:%M:%S')}] 命令下发: {cmd}")
+            except Exception as e:
+                print(f"[桥] 命令轮询失败: {e}")
         time.sleep(0.05)
 
 
