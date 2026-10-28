@@ -48,3 +48,10 @@ app_out.txt
 app_err.txt
 bridge_log.txt
 bridge_err.txt
+
+### Keil C51 本地产物（不入库） ###
+*.uvgui.*
+硬件层/obj/
+*.lst
+*.m51
+*.LST
