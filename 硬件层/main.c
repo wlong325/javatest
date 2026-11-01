@@ -60,6 +60,7 @@ bit ne555_candidate_valid = 0;
 unsigned long upload_count = 0;      // 上传成功次数（上电从 0 开始，不保存）
 unsigned int pot_mv_prev = 0;        // 电位器上次原始换算值（偶发0过滤用）
 unsigned int light_mv_prev = 0;      // 光敏上次原始换算值（偶发0过滤用）
+unsigned char adc_scan_step = 0;         // PCF8591 channel scan phase
 bit tx_ok_flag = 0;                  // 1 = 已发出一帧，等待发送完成
 bit tx_led_on = 0;                   // L8 点亮状态
 unsigned char TX_LED_Task = 0;       // L8 亮灯计时（LED_BLINK_TIME 后熄灭）
@@ -72,6 +73,7 @@ bit disp_dirty = 1;                  // 1=显示内容有变化，需重算 seg[]（上电先算
 /********************************* 任务计数器 ********************************/
 unsigned char PCF8591_Task = 0;
 unsigned char DS18B20_Task = 0;
+bit temp_has = 0;
 unsigned int  NE555_Task = 0;
 unsigned int  Send_Task = 0;
 
@@ -255,6 +257,10 @@ void Display_Proc(void)
 void Task_Proc(void)
 {
     unsigned int raw_temp;
+    unsigned int raw_temp_2;
+    long int temp_value;
+    long int temp_value_2;
+    unsigned char temp_pair_ok;
     unsigned char tx_i;
     unsigned int pot_raw;
     unsigned int light_raw;
@@ -266,22 +272,38 @@ void Task_Proc(void)
         PCF8591_Task = 0;
         PCF8591_Adc(adc);
         pot_raw = (unsigned int)((unsigned long)adc[3] * 5000 / 255);
-        light_raw = (unsigned int)((unsigned long)adc[1] * 5000 / 255);
-        /* B方案：偶发读到 0（IIC 偶发错误）时沿用上次值；连续两次 0 才认为是真实归零 */
-        if(pot_raw != 0 || pot_mv_prev == 0) pot_mv = pot_raw;
-        pot_mv_prev = pot_raw;
-        if(light_raw != 0 || light_mv_prev == 0) light_mv = light_raw;
-        light_mv_prev = light_raw;
+        /* Driver returns the previous conversion; channel 1 refreshes at scan step 2. */
+        if(adc_scan_step == 2)
+        {
+            light_raw = (unsigned int)((unsigned long)adc[1] * 5000 / 255);
+            /*
+             * Treat an exact zero from PCF8591 as an invalid transient sample.
+             * Keep the last valid value so one bad I2C conversion cannot blank
+             * the display or enter the next upload frame.
+             */
+            if(light_raw != 0)
+            {
+                light_mv = light_raw;
+                light_mv_prev = light_raw;
 
-        /* 去抖：显示值仅当变化超过阈值才更新，防低位抖动导致数码管闪烁 */
-        if(light_mv > disp_light)
-        {
-            if(light_mv - disp_light >= 5) { disp_light = light_mv; disp_dirty = 1; }
+                if(light_mv > disp_light)
+                {
+                    if(light_mv - disp_light >= 5) { disp_light = light_mv; disp_dirty = 1; }
+                }
+                else
+                {
+                    if(disp_light - light_mv >= 5) { disp_light = light_mv; disp_dirty = 1; }
+                }
+            }
         }
-        else
+        if(adc_scan_step == 0)
         {
-            if(disp_light - light_mv >= 5) { disp_light = light_mv; disp_dirty = 1; }
+            if(pot_raw != 0 || pot_mv_prev == 0) pot_mv = pot_raw;
+            pot_mv_prev = pot_raw;
         }
+        adc_scan_step++;
+        if(adc_scan_step >= 4) adc_scan_step = 0;
+
         if(pot_mv > disp_pot)
         {
             if(pot_mv - disp_pot >= 5) { disp_pot = pot_mv; disp_dirty = 1; }
@@ -296,16 +318,57 @@ void Task_Proc(void)
     {
         DS18B20_Task = 0;
         raw_temp = rd_temperature();
-        if(raw_temp != 0xFFFF && (raw_temp <= 0x07D0 || raw_temp >= 0xFC90))
+        if(raw_temp != 0xFFFF)
         {
-            ds18b20 = DS18B20_ToIntC(raw_temp);
-            if(ds18b20 > disp_temp)
+            temp_value = DS18B20_ToIntC(raw_temp);
+            raw_temp_2 = rd_temperature();
+            temp_pair_ok = 0;
+            if(raw_temp_2 != 0xFFFF)
             {
-                if(ds18b20 - disp_temp >= 2) { disp_temp = ds18b20; disp_dirty = 1; }
-            }
-            else
-            {
-                if(disp_temp - ds18b20 >= 2) { disp_temp = ds18b20; disp_dirty = 1; }
+                temp_value_2 = DS18B20_ToIntC(raw_temp_2);
+                if(temp_value_2 > temp_value)
+                {
+                    if(temp_value_2 - temp_value <= 100)
+                    {
+                        temp_value = temp_value_2;
+                        temp_pair_ok = 1;
+                    }
+                }
+                else
+                {
+                    if(temp_value - temp_value_2 <= 100)
+                    {
+                        temp_value = temp_value_2;
+                        temp_pair_ok = 1;
+                    }
+                }
+
+                /* Reject impossible values and a sudden one-frame jump. */
+                if(temp_pair_ok && temp_value >= -2000 && temp_value <= 8000)
+                {
+                    if(!temp_has)
+                    {
+                        temp_has = 1;
+                        ds18b20 = temp_value;
+                    }
+                    else if(temp_value > ds18b20)
+                    {
+                        if(temp_value - ds18b20 <= 500) ds18b20 = temp_value;
+                    }
+                    else
+                    {
+                        if(ds18b20 - temp_value <= 500) ds18b20 = temp_value;
+                    }
+
+                    if(ds18b20 > disp_temp)
+                    {
+                        if(ds18b20 - disp_temp >= 2) { disp_temp = ds18b20; disp_dirty = 1; }
+                    }
+                    else
+                    {
+                        if(disp_temp - ds18b20 >= 2) { disp_temp = ds18b20; disp_dirty = 1; }
+                    }
+                }
             }
         }
     }
@@ -319,29 +382,8 @@ void Task_Proc(void)
         TL0 = 0;
         TR0 = 1;
 
-        if(ne555_candidate_valid == 0)
-        {
-            ne555_candidate = measured_frequency;
-            ne555_candidate_valid = 1;
-        }
-        else
-        {
-            if(measured_frequency > ne555_candidate)
-                frequency_delta = measured_frequency - ne555_candidate;
-            else
-                frequency_delta = ne555_candidate - measured_frequency;
-
-            if(frequency_delta <= 2)
-            {
-                ne555 = measured_frequency;
-                ne555_candidate_valid = 0;
-                disp_dirty = 1;
-            }
-            else
-            {
-                ne555_candidate = measured_frequency;
-            }
-        }
+        ne555 = measured_frequency;
+        disp_dirty = 1;
     }
 
     if(Send_Task >= SEND_TASK_TIME)
