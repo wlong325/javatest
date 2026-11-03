@@ -51,7 +51,8 @@ bridge_err.txt
 
 ### Keil C51 本地产物（不入库） ###
 *.uvgui.*
-硬件层/obj/
 *.lst
-*.m51
 *.LST
+*.m51
+# 编译中间件目录：内含 .obj / .hex / .lnp / build_log.htm，硬件层 与 wifi/蓝桥杯模板 通用
+obj/
