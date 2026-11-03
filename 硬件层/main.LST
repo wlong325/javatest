@@ -1,4 +1,4 @@
-C51 COMPILER V9.56.0.0   MAIN                                                              10/30/2026 20:47:17 PAGE 1   
+C51 COMPILER V9.56.0.0   MAIN                                                              11/03/2026 13:12:53 PAGE 1   
 
 
 C51 COMPILER V9.56.0.0, COMPILATION OF MODULE MAIN
@@ -62,7 +62,7 @@ line level    source
   52          unsigned int light_mv = 0;
   53          long int ds18b20 = 22;
   54          unsigned int ne555 = 0;
-C51 COMPILER V9.56.0.0   MAIN                                                              10/30/2026 20:47:17 PAGE 2   
+C51 COMPILER V9.56.0.0   MAIN                                                              11/03/2026 13:12:53 PAGE 2   
 
   55          unsigned int wave = 0;
   56          unsigned int ne555_candidate = 0;
@@ -76,789 +76,1015 @@ line level    source
   64          bit tx_ok_flag = 0;                  // 1 = 已发出一帧，等待发送完成
   65          bit tx_led_on = 0;                   // L8 点亮状态
   66          unsigned char TX_LED_Task = 0;       // L8 亮灯计时（LED_BLINK_TIME 后熄灭）
-  67          unsigned char mode = 4;              // 显示界面 0~4（界面1~5），S4 切换，默认界面5
-  68          long int disp_temp = 22;             // 显示用温度（×100），去抖后值
-  69          unsigned int disp_light = 0;         // 显示用光敏 mV（去抖后值）
-  70          unsigned int disp_pot = 0;           // 显示用电位器 mV（去抖后值）
-  71          bit disp_dirty = 1;                  // 1=显示内容有变化，需重算 seg[]（上电先算一次）
-  72          
-  73          /********************************* 任务计数器 ********************************/
-  74          unsigned char PCF8591_Task = 0;
-  75          unsigned char DS18B20_Task = 0;
-  76          bit temp_has = 0;
-  77          unsigned int  NE555_Task = 0;
-  78          unsigned int  Send_Task = 0;
-  79          
-  80          /********************************* 按键与发送使能 ********************************/
-  81          unsigned char key_val = 0;      // 当前按键值
-  82          unsigned char key_old = 0;      // 上一次按键值
-  83          unsigned char key_down = 0;     // 按下瞬间，保持一轮
-  84          unsigned char KEY_Task = 0;     // 按键扫描节流（10ms）
-  85          bit send_enable = 0;            // 0=未启动；按 S4 后置 1
-  86          bit esp_handshake_done = 0;      // ESP-01S 上电握手测试：1=测试结束
-  87          bit esp_at_pending = 0;          // 1=主循环需要发 AT
-  88          bit esp_ok = 0;                  // 1=收到模块返回的 OK
-  89          unsigned int esp_timer = 0;      // 握手计时（ms）
-  90          
-  91          /********************************* 串口发送缓冲 ********************************/
-  92          #define TX1_LENGTH 80
-  93          xdata char TX1_Buffer[TX1_LENGTH];
-  94          unsigned char B_TX1_busy = 255;
-  95          
-  96          /********************************* 串口接收缓冲 ********************************/
-  97          xdata char RX1_Buffer[RX1_LENGTH];
-  98          volatile unsigned char B_RX1_Con = 0;                         // 已接收字节数
-  99          volatile unsigned char B_RX1_flag = 0;                                  // 1=一帧接收完成，主循环可解析
- 100          volatile unsigned char UART_Idle_Task = 0;                    // 接收空闲计时（10ms 判帧结束）
- 101          
- 102          /********************************* PCA 计数 ********************************/
- 103          unsigned int TIME_1 = TIME_CCAP1;
- 104          unsigned int TIME_2 = TIME_CCAP2;
+  67          unsigned char mode = 5;  /* 默认 WiFi 界面 */              // 显示界面 0~4（界面1~5），S4 切换，默认界面5
+  68          long int disp_temp = 22;
+  69          xdata unsigned char wifi_state = 0;
+  70          xdata unsigned int  wifi_timer = 0;
+  71          bit wifi_connected = 0;             /* WiFi TCP 是否已连 */
+  72          xdata char wifi_tx_buf[80];
+  73          bit wifi_tx_ready = 0;
+  74          xdata unsigned char wifi_tx_len = 0;
+  75          xdata unsigned int  wifi_tx_timer = 0;
+  76          
+  77          unsigned int disp_light = 0;         // 显示用光敏 mV（去抖后值）
+  78          unsigned int disp_pot = 0;           // 显示用电位器 mV（去抖后值）
+  79          bit disp_dirty = 1;                  // 1=显示内容有变化，需重算 seg[]（上电先算一次）
+  80          
+  81          /********************************* 任务计数器 ********************************/
+  82          unsigned char PCF8591_Task = 0;
+  83          unsigned char DS18B20_Task = 0;
+  84          bit temp_has = 0;
+  85          unsigned int  NE555_Task = 0;
+  86          unsigned int  Send_Task = 0;
+  87          
+  88          /********************************* 按键与发送使能 ********************************/
+  89          unsigned char key_val = 0;      // 当前按键值
+  90          unsigned char key_old = 0;      // 上一次按键值
+  91          unsigned char key_down = 0;     // 按下瞬间，保持一轮
+  92          unsigned char KEY_Task = 0;     // 按键扫描节流（10ms）
+  93          bit send_enable = 0;            // 0=未启动；按 S4 后置 1
+  94          
+  95          /********************************* 串口发送缓冲 ********************************/
+  96          #define TX1_LENGTH 80
+  97          xdata char TX1_Buffer[TX1_LENGTH];
+  98          unsigned char B_TX1_busy = 255;
+  99          
+ 100          /********************************* 串口接收缓冲 ********************************/
+ 101          xdata char RX1_Buffer[RX1_LENGTH];
+ 102          volatile unsigned char B_RX1_Con = 0;                         // 已接收字节数
+ 103          volatile unsigned char B_RX1_flag = 0;                                  // 1=一帧接收完成，主循环可解析
+ 104          volatile unsigned char UART_Idle_Task = 0;                    // 接收空闲计时（10ms 判帧结束）
  105          
- 106          /********************************* 函数声明 *********************************/
- 107          void System_Init(void);
- 108          void HC573_Write(unsigned char channel,unsigned char dat);
- 109          void Display_Clear(void);
- 110          void Display_Proc(void);
- 111          void Seg_ShowFixed(unsigned long val, unsigned char digits, unsigned char point, bit hide_zero);
- 112          void Task_Proc(void);
- 113          void Led_Proc(void);
- 114          void Uart_SendString(char *str);
- 115          void Uart_TxClear(void);
- 116          void Uart_Proc(void);
-C51 COMPILER V9.56.0.0   MAIN                                                              10/30/2026 20:47:17 PAGE 3   
+ 106          /********************************* PCA 计数 ********************************/
+ 107          unsigned int TIME_1 = TIME_CCAP1;
+ 108          unsigned int TIME_2 = TIME_CCAP2;
+ 109          
+ 110          /********************************* 函数声明 *********************************/
+ 111          void System_Init(void);
+ 112          void HC573_Write(unsigned char channel,unsigned char dat);
+ 113          void Display_Clear(void);
+ 114          void Display_Proc(void);
+ 115          void Seg_ShowFixed(unsigned long val, unsigned char digits, unsigned char point, bit hide_zero);
+ 116          void Task_Proc(void);
+C51 COMPILER V9.56.0.0   MAIN                                                              11/03/2026 13:12:53 PAGE 3   
 
- 117          void Uart_ClearRxBuffer(void);
- 118          bit Uart_ParseOneCommand(unsigned char start,unsigned char end,unsigned char reply_enable);
- 119          void Uart_TxStart(void);
- 120          void Uart_TxPutChar(unsigned char *idx,char dat);
- 121          void Uart_TxPutString(unsigned char *idx,char *str);
- 122          void Uart_TxPutUInt(unsigned char *idx,unsigned int dat);
- 123          void Timer0Init(void);
- 124          void Timer1Init(void);
- 125          void PCA_TIME_init(void);
- 126          long int DS18B20_ToIntC(unsigned int raw);
- 127          
- 128          /* ===== 预留接口（当前未使用，仅保留声明） ===== */
- 129          void Key_Proc(void);                          // 按键扫描
- 130          unsigned char Key_Read(void);                 // 按键读取
- 131          void Logic_Proc(void);                        // 业务逻辑
- 132          void Relay_Buzz_Proc(void);                   // 继电器/蜂鸣器
- 133          void Uart_Report_Proc(void);                  // 异常上报
- 134          void Uart_TxPut2Digit(unsigned char *idx,unsigned char dat);
- 135          void Uart_TxPutVoltage(unsigned char *idx,unsigned int mv);
- 136          void EEPROM_LoadParams(void);
- 137          void EEPROM_SaveParams(void);
- 138          
- 139          /********************************* 主函数 ************************************/
- 140          void main(void)
- 141          {
- 142   1          System_Init();
- 143   1      
- 144   1          while(1)
- 145   1          {
- 146   2              if(esp_at_pending)
- 147   2              {
- 148   3                  esp_at_pending = 0;
- 149   3                  Uart_SendString("AT\r\n");
- 150   3              }
- 151   2              Display_Proc();
- 152   2              Key_Proc();
- 153   2              Task_Proc();
- 154   2              Led_Proc();
- 155   2              Uart_Proc();
- 156   2          }
- 157   1      }
- 158          
- 159          /********************************* 初始化 ************************************/
- 160          void System_Init(void)
- 161          {
- 162   1          HC573_Write(4,0xff);
- 163   1          HC573_Write(5,0x00);
- 164   1          HC573_Write(6,0x00);
- 165   1          HC573_Write(7,0xff);
- 166   1      
- 167   1          Display_Clear();
- 168   1          Timer0Init();
- 169   1          Timer1Init();
- 170   1          uart_init();
- 171   1          EA = 1;
- 172   1      }
- 173          
- 174          void HC573_Write(unsigned char channel,unsigned char dat)
- 175          {
- 176   1          P2 &= 0x1f;
- 177   1          P0 = dat;
- 178   1          switch(channel)
-C51 COMPILER V9.56.0.0   MAIN                                                              10/30/2026 20:47:17 PAGE 4   
+ 117          void Led_Proc(void);
+ 118          void Uart_SendString(char *str);
+ 119          void Uart_TxClear(void);
+ 120          void Uart_Proc(void);
+ 121          void WiFi_Proc(void);
+ 122          bit FindInRx(char *sub);
+ 123          
+ 124          
+ 125          void Uart_ClearRxBuffer(void);
+ 126          bit Uart_ParseOneCommand(unsigned char start,unsigned char end,unsigned char reply_enable);
+ 127          void Uart_TxStart(void);
+ 128          void Uart_TxPutChar(unsigned char *idx,char dat);
+ 129          void Uart_TxPutString(unsigned char *idx,char *str);
+ 130          void Uart_TxPutUInt(unsigned char *idx,unsigned int dat);
+ 131          void Timer0Init(void);
+ 132          void Timer1Init(void);
+ 133          void PCA_TIME_init(void);
+ 134          long int DS18B20_ToIntC(unsigned int raw);
+ 135          
+ 136          /* ===== 预留接口（当前未使用，仅保留声明） ===== */
+ 137          void Key_Proc(void);                          // 按键扫描
+ 138          unsigned char Key_Read(void);                 // 按键读取
+ 139          void Logic_Proc(void);                        // 业务逻辑
+ 140          void Relay_Buzz_Proc(void);                   // 继电器/蜂鸣器
+ 141          void Uart_Report_Proc(void);                  // 异常上报
+ 142          void Uart_TxPut2Digit(unsigned char *idx,unsigned char dat);
+ 143          void Uart_TxPutVoltage(unsigned char *idx,unsigned int mv);
+ 144          void EEPROM_LoadParams(void);
+ 145          void EEPROM_SaveParams(void);
+ 146          
+ 147          /********************************* 主函数 ************************************/
+ 148          void main(void)
+ 149          {
+ 150   1          System_Init();
+ 151   1      
+ 152   1          while(1)
+ 153   1          {
+ 154   2              Display_Proc();
+ 155   2              Key_Proc();
+ 156   2              Task_Proc();
+ 157   2              Led_Proc();
+ 158   2              WiFi_Proc();
+ 159   2              Uart_Proc();
+ 160   2          }
+ 161   1      }
+ 162          
+ 163          /********************************* 初始化 ************************************/
+ 164          void System_Init(void)
+ 165          {
+ 166   1          HC573_Write(4,0xff);
+ 167   1          HC573_Write(5,0x00);
+ 168   1          HC573_Write(6,0x00);
+ 169   1          HC573_Write(7,0xff);
+ 170   1      
+ 171   1          Display_Clear();
+ 172   1          Timer0Init();
+ 173   1          Timer1Init();
+ 174   1          uart_init();
+ 175   1          EA = 1;
+ 176   1      }
+ 177          
+ 178          void HC573_Write(unsigned char channel,unsigned char dat)
+C51 COMPILER V9.56.0.0   MAIN                                                              11/03/2026 13:12:53 PAGE 4   
 
- 179   1          {
- 180   2              case 4: P2 = (P2 & 0x1f) | 0x80; break;
- 181   2              case 5: P2 = (P2 & 0x1f) | 0xa0; break;
- 182   2              case 6: P2 = (P2 & 0x1f) | 0xc0; break;
- 183   2              case 7: P2 = (P2 & 0x1f) | 0xe0; break;
- 184   2              default: break;
- 185   2          }
- 186   1          P2 &= 0x1f;
- 187   1      }
- 188          
- 189          void Display_Clear(void)
- 190          {
- 191   1          unsigned char i;
- 192   1          for(i=0;i<8;i++) seg[i] = SEG_BLANK;
- 193   1      }
- 194          
- 195          /********************************* 数码管显示 *********************************
- 196           * 5 个界面由 S4 循环切换（mode 0~4）：
- 197           *   界面1：温度 xx.xx℃；界面2：光敏 x.xxxV；界面3：电位器 x.xxxV；
- 198           *   界面4：NE555 频率；界面5：上传成功次数。
- 199           * 界面1~3 的值来自最近一次采集（即发送帧内容），每帧刷新。
- 200           * 小数点显示用带点段码（Code[d+16]），point 为从右数第几位带点。
- 201           ******************************************************************************/
- 202          void Seg_ShowFixed(unsigned long val, unsigned char digits, unsigned char point, bit hide_zero)
- 203          {
- 204   1          unsigned char i;
- 205   1          unsigned char d;
- 206   1          unsigned char show = 0;
- 207   1          unsigned char pos = 8 - digits;
- 208   1          unsigned char tmp[8];
- 209   1      
- 210   1          for(i=0;i<digits;i++)            /* 按高位顺序拆出各位（只用除10/取模） */
- 211   1          {
- 212   2              tmp[digits - 1 - i] = (unsigned char)(val % 10);
- 213   2              val /= 10;
- 214   2          }
- 215   1          for(i=0;i<8;i++) seg[i] = SEG_BLANK;
- 216   1      
- 217   1          for(i=0;i<digits;i++, pos++)
- 218   1          {
- 219   2              d = tmp[i];
- 220   2              if(hide_zero && show == 0 && d == 0 && i < digits - 1)
- 221   2                  seg[pos] = SEG_BLANK;
- 222   2              else
- 223   2              {
- 224   3                  show = 1;
- 225   3                  seg[pos] = ((digits - i) == point) ? (d + 16) : d;
- 226   3              }
- 227   2          }
- 228   1      }
- 229          
- 230          void Display_Proc(void)
- 231          {
- 232   1          if(disp_dirty == 0) return;    /* 内容未变化：跳过重算，主循环保持轻快 */
- 233   1          disp_dirty = 0;
- 234   1      
- 235   1          if(!esp_handshake_done)
- 236   1          {
- 237   2              if(esp_ok) Seg_ShowFixed(8888, 4, 0, 0);
- 238   2              else Seg_ShowFixed(0, 4, 0, 0);
- 239   2              return;
- 240   2          }
-C51 COMPILER V9.56.0.0   MAIN                                                              10/30/2026 20:47:17 PAGE 5   
+ 179          {
+ 180   1          P2 &= 0x1f;
+ 181   1          P0 = dat;
+ 182   1          switch(channel)
+ 183   1          {
+ 184   2              case 4: P2 = (P2 & 0x1f) | 0x80; break;
+ 185   2              case 5: P2 = (P2 & 0x1f) | 0xa0; break;
+ 186   2              case 6: P2 = (P2 & 0x1f) | 0xc0; break;
+ 187   2              case 7: P2 = (P2 & 0x1f) | 0xe0; break;
+ 188   2              default: break;
+ 189   2          }
+ 190   1          P2 &= 0x1f;
+ 191   1      }
+ 192          
+ 193          void Display_Clear(void)
+ 194          {
+ 195   1          unsigned char i;
+ 196   1          for(i=0;i<8;i++) seg[i] = SEG_BLANK;
+ 197   1      }
+ 198          
+ 199          /********************************* 数码管显示 *********************************
+ 200           * 5 个界面由 S4 循环切换（mode 0~4）：
+ 201           *   界面1：温度 xx.xx℃；界面2：光敏 x.xxxV；界面3：电位器 x.xxxV；
+ 202           *   界面4：NE555 频率；界面5：上传成功次数。
+ 203           * 界面1~3 的值来自最近一次采集（即发送帧内容），每帧刷新。
+ 204           * 小数点显示用带点段码（Code[d+16]），point 为从右数第几位带点。
+ 205           ******************************************************************************/
+ 206          void Seg_ShowFixed(unsigned long val, unsigned char digits, unsigned char point, bit hide_zero)
+ 207          {
+ 208   1          unsigned char i;
+ 209   1          unsigned char d;
+ 210   1          unsigned char show = 0;
+ 211   1          unsigned char pos = 8 - digits;
+ 212   1          unsigned char tmp[8];
+ 213   1      
+ 214   1          for(i=0;i<digits;i++)            /* 按高位顺序拆出各位（只用除10/取模） */
+ 215   1          {
+ 216   2              tmp[digits - 1 - i] = (unsigned char)(val % 10);
+ 217   2              val /= 10;
+ 218   2          }
+ 219   1          for(i=0;i<8;i++) seg[i] = SEG_BLANK;
+ 220   1      
+ 221   1          for(i=0;i<digits;i++, pos++)
+ 222   1          {
+ 223   2              d = tmp[i];
+ 224   2              if(hide_zero && show == 0 && d == 0 && i < digits - 1)
+ 225   2                  seg[pos] = SEG_BLANK;
+ 226   2              else
+ 227   2              {
+ 228   3                  show = 1;
+ 229   3                  seg[pos] = ((digits - i) == point) ? (d + 16) : d;
+ 230   3              }
+ 231   2          }
+ 232   1      }
+ 233          
+ 234          void Display_Proc(void)
+ 235          {
+ 236   1          if(disp_dirty == 0) return;    /* 内容未变化：跳过重算，主循环保持轻快 */
+ 237   1          disp_dirty = 0;
+ 238   1      
+ 239   1          switch(mode)
+ 240   1          {
+C51 COMPILER V9.56.0.0   MAIN                                                              11/03/2026 13:12:53 PAGE 5   
 
- 241   1      
- 242   1          switch(mode)
- 243   1          {
- 244   2              case 0:  /* 界面1：温度 xx.xx ℃ */
- 245   2                  if(disp_temp < 0)
- 246   2                  {
- 247   3                      Seg_ShowFixed((unsigned long)(-disp_temp), 4, 3, 0);
- 248   3                      seg[3] = 33;         /* 负号段码 Code[33]=0xBF（共阳，只亮 g 段） */
- 249   3                  }
- 250   2                  else
- 251   2                      Seg_ShowFixed((unsigned long)disp_temp, 4, 3, 0);
+ 241   2              case 0:  /* 界面1：温度 xx.xx ℃ */
+ 242   2                  if(disp_temp < 0)
+ 243   2                  {
+ 244   3                      Seg_ShowFixed((unsigned long)(-disp_temp), 4, 3, 0);
+ 245   3                      seg[3] = 33;         /* 负号段码 Code[33]=0xBF（共阳，只亮 g 段） */
+ 246   3                  }
+ 247   2                  else
+ 248   2                      Seg_ShowFixed((unsigned long)disp_temp, 4, 3, 0);
+ 249   2                  break;
+ 250   2              case 1:  /* 界面2：光敏电压 x.xxx V */
+ 251   2                  Seg_ShowFixed(disp_light, 4, 4, 0);
  252   2                  break;
- 253   2              case 1:  /* 界面2：光敏电压 x.xxx V */
- 254   2                  Seg_ShowFixed(disp_light, 4, 4, 0);
+ 253   2              case 2:  /* 界面3：电位器 x.xxx V */
+ 254   2                  Seg_ShowFixed(disp_pot, 4, 4, 0);
  255   2                  break;
- 256   2              case 2:  /* 界面3：电位器 x.xxx V */
- 257   2                  Seg_ShowFixed(disp_pot, 4, 4, 0);
+ 256   2              case 3:  /* 界面4：NE555 频率 Hz */
+ 257   2                  Seg_ShowFixed(ne555, 8, 0, 1);
  258   2                  break;
- 259   2              case 3:  /* 界面4：NE555 频率 Hz */
- 260   2                  Seg_ShowFixed(ne555, 8, 0, 1);
- 261   2                  break;
- 262   2              default: /* 界面5：上传成功次数 */
- 263   2                  Seg_ShowFixed(upload_count, 8, 0, 1);
- 264   2                  break;
- 265   2          }
- 266   1      }
- 267          
- 268          /********************************* 任务调度 ***********************************
- 269           * 各传感器按周期采集；
- 270           * 每 SEND_TASK_TIME 拼一帧发到串口；
- 271           * 发送完成后计数 +1 并点亮 L1。
- 272           ******************************************************************************/
- 273          void Task_Proc(void)
- 274          {
- 275   1          unsigned int raw_temp;
- 276   1          unsigned int raw_temp_2;
- 277   1          long int temp_value;
- 278   1          long int temp_value_2;
- 279   1          unsigned char temp_pair_ok;
- 280   1          unsigned char tx_i;
- 281   1          unsigned int pot_raw;
- 282   1          unsigned int light_raw;
- 283   1          unsigned int measured_frequency;
- 284   1          unsigned int frequency_delta;
- 285   1      
- 286   1          if(!esp_handshake_done && B_RX1_flag == 1)
- 287   1          {
- 288   2              unsigned char i;
- 289   2              for(i=0; i<B_RX1_Con; i++)
- 290   2              {
- 291   3                  if(RX1_Buffer[i] == 'O' && RX1_Buffer[i+1] == 'K')
- 292   3                  {
- 293   4                      esp_ok = 1;
- 294   4                      disp_dirty = 1;
- 295   4                  }
- 296   3              }
- 297   2              B_RX1_Con = 0;
- 298   2              B_RX1_flag = 0;
- 299   2          }
- 300   1      
- 301   1          if(PCF8591_Task >= PCF8591_TASK_TIME)
- 302   1          {
-C51 COMPILER V9.56.0.0   MAIN                                                              10/30/2026 20:47:17 PAGE 6   
+ 259   2              case 5:  /* 界面6：WiFi 状态 */
+ 260   2                  if(wifi_state == 10)
+ 261   2                      Seg_ShowFixed(7777, 4, 0, 1);
+ 262   2                  else if(wifi_state >= 4)
+ 263   2                      Seg_ShowFixed(8888, 4, 0, 1);
+ 264   2                  else
+ 265   2                      Seg_ShowFixed(1111, 4, 0, 1);
+ 266   2                  break;
+ 267   2      
+ 268   2              default: /* 界面5：上传成功次数 */
+ 269   2                  Seg_ShowFixed(upload_count, 8, 0, 1);
+ 270   2                  break;
+ 271   2          }
+ 272   1      }
+ 273          
+ 274          /********************************* 任务调度 ***********************************
+ 275           * 各传感器按周期采集；
+ 276           * 每 SEND_TASK_TIME 拼一帧发到串口；
+ 277           * 发送完成后计数 +1 并点亮 L1。
+ 278           ******************************************************************************/
+ 279          void Task_Proc(void)
+ 280          {
+ 281   1          unsigned int raw_temp;
+ 282   1          unsigned int raw_temp_2;
+ 283   1          long int temp_value;
+ 284   1          long int temp_value_2;
+ 285   1          unsigned char temp_pair_ok;
+ 286   1          unsigned char tx_i;
+ 287   1          unsigned int pot_raw;
+ 288   1          unsigned int light_raw;
+ 289   1          unsigned int measured_frequency;
+ 290   1          unsigned int frequency_delta;
+ 291   1      
+ 292   1          if(PCF8591_Task >= PCF8591_TASK_TIME)
+ 293   1          {
+ 294   2              PCF8591_Task = 0;
+ 295   2              PCF8591_Adc(adc);
+ 296   2              pot_raw = (unsigned int)((unsigned long)adc[3] * 5000 / 255);
+ 297   2              /* Driver returns the previous conversion; channel 1 refreshes at scan step 2. */
+ 298   2              if(adc_scan_step == 2)
+ 299   2              {
+ 300   3                  light_raw = (unsigned int)((unsigned long)adc[1] * 5000 / 255);
+ 301   3                  /*
+ 302   3                   * Treat an exact zero from PCF8591 as an invalid transient sample.
+C51 COMPILER V9.56.0.0   MAIN                                                              11/03/2026 13:12:53 PAGE 6   
 
- 303   2              PCF8591_Task = 0;
- 304   2              PCF8591_Adc(adc);
- 305   2              pot_raw = (unsigned int)((unsigned long)adc[3] * 5000 / 255);
- 306   2              /* Driver returns the previous conversion; channel 1 refreshes at scan step 2. */
- 307   2              if(adc_scan_step == 2)
- 308   2              {
- 309   3                  light_raw = (unsigned int)((unsigned long)adc[1] * 5000 / 255);
- 310   3                  /*
- 311   3                   * Treat an exact zero from PCF8591 as an invalid transient sample.
- 312   3                   * Keep the last valid value so one bad I2C conversion cannot blank
- 313   3                   * the display or enter the next upload frame.
- 314   3                   */
- 315   3                  if(light_raw != 0)
- 316   3                  {
- 317   4                      light_mv = light_raw;
- 318   4                      light_mv_prev = light_raw;
- 319   4      
- 320   4                      if(light_mv > disp_light)
- 321   4                      {
- 322   5                          if(light_mv - disp_light >= 5) { disp_light = light_mv; disp_dirty = 1; }
- 323   5                      }
- 324   4                      else
- 325   4                      {
- 326   5                          if(disp_light - light_mv >= 5) { disp_light = light_mv; disp_dirty = 1; }
- 327   5                      }
- 328   4                  }
- 329   3              }
- 330   2              if(adc_scan_step == 0)
- 331   2              {
- 332   3                  if(pot_raw != 0 || pot_mv_prev == 0) pot_mv = pot_raw;
- 333   3                  pot_mv_prev = pot_raw;
- 334   3              }
- 335   2              adc_scan_step++;
- 336   2              if(adc_scan_step >= 4) adc_scan_step = 0;
- 337   2      
- 338   2              if(pot_mv > disp_pot)
- 339   2              {
- 340   3                  if(pot_mv - disp_pot >= 5) { disp_pot = pot_mv; disp_dirty = 1; }
- 341   3              }
- 342   2              else
- 343   2              {
- 344   3                  if(disp_pot - pot_mv >= 5) { disp_pot = pot_mv; disp_dirty = 1; }
- 345   3              }
- 346   2          }
- 347   1      
- 348   1          if(DS18B20_Task >= DS18B20_TASK_TIME)
- 349   1          {
- 350   2              DS18B20_Task = 0;
- 351   2              raw_temp = rd_temperature();
- 352   2              if(raw_temp != 0xFFFF)
- 353   2              {
- 354   3                  temp_value = DS18B20_ToIntC(raw_temp);
- 355   3                  raw_temp_2 = rd_temperature();
- 356   3                  temp_pair_ok = 0;
- 357   3                  if(raw_temp_2 != 0xFFFF)
- 358   3                  {
- 359   4                      temp_value_2 = DS18B20_ToIntC(raw_temp_2);
- 360   4                      if(temp_value_2 > temp_value)
- 361   4                      {
- 362   5                          if(temp_value_2 - temp_value <= 100)
- 363   5                          {
- 364   6                              temp_value = temp_value_2;
-C51 COMPILER V9.56.0.0   MAIN                                                              10/30/2026 20:47:17 PAGE 7   
+ 303   3                   * Keep the last valid value so one bad I2C conversion cannot blank
+ 304   3                   * the display or enter the next upload frame.
+ 305   3                   */
+ 306   3                  if(light_raw != 0)
+ 307   3                  {
+ 308   4                      light_mv = light_raw;
+ 309   4                      light_mv_prev = light_raw;
+ 310   4      
+ 311   4                      if(light_mv > disp_light)
+ 312   4                      {
+ 313   5                          if(light_mv - disp_light >= 5) { disp_light = light_mv; disp_dirty = 1; }
+ 314   5                      }
+ 315   4                      else
+ 316   4                      {
+ 317   5                          if(disp_light - light_mv >= 5) { disp_light = light_mv; disp_dirty = 1; }
+ 318   5                      }
+ 319   4                  }
+ 320   3              }
+ 321   2              if(adc_scan_step == 0)
+ 322   2              {
+ 323   3                  if(pot_raw != 0 || pot_mv_prev == 0) pot_mv = pot_raw;
+ 324   3                  pot_mv_prev = pot_raw;
+ 325   3              }
+ 326   2              adc_scan_step++;
+ 327   2              if(adc_scan_step >= 4) adc_scan_step = 0;
+ 328   2      
+ 329   2              if(pot_mv > disp_pot)
+ 330   2              {
+ 331   3                  if(pot_mv - disp_pot >= 5) { disp_pot = pot_mv; disp_dirty = 1; }
+ 332   3              }
+ 333   2              else
+ 334   2              {
+ 335   3                  if(disp_pot - pot_mv >= 5) { disp_pot = pot_mv; disp_dirty = 1; }
+ 336   3              }
+ 337   2          }
+ 338   1      
+ 339   1          if(DS18B20_Task >= DS18B20_TASK_TIME)
+ 340   1          {
+ 341   2              DS18B20_Task = 0;
+ 342   2              raw_temp = rd_temperature();
+ 343   2              if(raw_temp != 0xFFFF)
+ 344   2              {
+ 345   3                  temp_value = DS18B20_ToIntC(raw_temp);
+ 346   3                  raw_temp_2 = rd_temperature();
+ 347   3                  temp_pair_ok = 0;
+ 348   3                  if(raw_temp_2 != 0xFFFF)
+ 349   3                  {
+ 350   4                      temp_value_2 = DS18B20_ToIntC(raw_temp_2);
+ 351   4                      if(temp_value_2 > temp_value)
+ 352   4                      {
+ 353   5                          if(temp_value_2 - temp_value <= 100)
+ 354   5                          {
+ 355   6                              temp_value = temp_value_2;
+ 356   6                              temp_pair_ok = 1;
+ 357   6                          }
+ 358   5                      }
+ 359   4                      else
+ 360   4                      {
+ 361   5                          if(temp_value - temp_value_2 <= 100)
+ 362   5                          {
+ 363   6                              temp_value = temp_value_2;
+ 364   6                              temp_pair_ok = 1;
+C51 COMPILER V9.56.0.0   MAIN                                                              11/03/2026 13:12:53 PAGE 7   
 
- 365   6                              temp_pair_ok = 1;
- 366   6                          }
- 367   5                      }
- 368   4                      else
- 369   4                      {
- 370   5                          if(temp_value - temp_value_2 <= 100)
- 371   5                          {
- 372   6                              temp_value = temp_value_2;
- 373   6                              temp_pair_ok = 1;
- 374   6                          }
- 375   5                      }
- 376   4      
- 377   4                      /* Reject impossible values and a sudden one-frame jump. */
- 378   4                      if(temp_pair_ok && temp_value >= -2000 && temp_value <= 8000)
- 379   4                      {
- 380   5                          if(!temp_has)
+ 365   6                          }
+ 366   5                      }
+ 367   4      
+ 368   4                      /* Reject impossible values and a sudden one-frame jump. */
+ 369   4                      if(temp_pair_ok && temp_value >= -2000 && temp_value <= 8000)
+ 370   4                      {
+ 371   5                          if(!temp_has)
+ 372   5                          {
+ 373   6                              temp_has = 1;
+ 374   6                              ds18b20 = temp_value;
+ 375   6                          }
+ 376   5                          else if(temp_value > ds18b20)
+ 377   5                          {
+ 378   6                              if(temp_value - ds18b20 <= 500) ds18b20 = temp_value;
+ 379   6                          }
+ 380   5                          else
  381   5                          {
- 382   6                              temp_has = 1;
- 383   6                              ds18b20 = temp_value;
- 384   6                          }
- 385   5                          else if(temp_value > ds18b20)
+ 382   6                              if(ds18b20 - temp_value <= 500) ds18b20 = temp_value;
+ 383   6                          }
+ 384   5      
+ 385   5                          if(ds18b20 > disp_temp)
  386   5                          {
- 387   6                              if(temp_value - ds18b20 <= 500) ds18b20 = temp_value;
+ 387   6                              if(ds18b20 - disp_temp >= 2) { disp_temp = ds18b20; disp_dirty = 1; }
  388   6                          }
  389   5                          else
  390   5                          {
- 391   6                              if(ds18b20 - temp_value <= 500) ds18b20 = temp_value;
+ 391   6                              if(disp_temp - ds18b20 >= 2) { disp_temp = ds18b20; disp_dirty = 1; }
  392   6                          }
- 393   5      
- 394   5                          if(ds18b20 > disp_temp)
- 395   5                          {
- 396   6                              if(ds18b20 - disp_temp >= 2) { disp_temp = ds18b20; disp_dirty = 1; }
- 397   6                          }
- 398   5                          else
- 399   5                          {
- 400   6                              if(disp_temp - ds18b20 >= 2) { disp_temp = ds18b20; disp_dirty = 1; }
- 401   6                          }
- 402   5                      }
- 403   4                  }
- 404   3              }
- 405   2          }
- 406   1      
- 407   1          if(NE555_Task >= NE555_TASK_TIME)
- 408   1          {
- 409   2              NE555_Task = 0;
- 410   2              TR0 = 0;
- 411   2              measured_frequency = ((unsigned int)TH0 << 8) | TL0;
- 412   2              TH0 = 0;
- 413   2              TL0 = 0;
- 414   2              TR0 = 1;
- 415   2      
- 416   2              ne555 = measured_frequency;
- 417   2              disp_dirty = 1;
- 418   2          }
- 419   1      
- 420   1          if(Send_Task >= SEND_TASK_TIME)
- 421   1          {
- 422   2              tx_i = 0;
- 423   2              Send_Task = 0;
- 424   2              if(send_enable == 0) return;   /* 未按 S4：不上报 */
- 425   2              if(B_TX1_busy != 255) return;
- 426   2      
-C51 COMPILER V9.56.0.0   MAIN                                                              10/30/2026 20:47:17 PAGE 8   
+ 393   5                      }
+ 394   4                  }
+ 395   3              }
+ 396   2          }
+ 397   1      
+ 398   1          if(NE555_Task >= NE555_TASK_TIME)
+ 399   1          {
+ 400   2              NE555_Task = 0;
+ 401   2              TR0 = 0;
+ 402   2              measured_frequency = ((unsigned int)TH0 << 8) | TL0;
+ 403   2              TH0 = 0;
+ 404   2              TL0 = 0;
+ 405   2              TR0 = 1;
+ 406   2      
+ 407   2              ne555 = measured_frequency;
+ 408   2              disp_dirty = 1;
+ 409   2          }
+ 410   1      
+ 411   1          if(Send_Task >= SEND_TASK_TIME)
+ 412   1          {
+ 413   2              unsigned char wi = 0;
+ 414   2              unsigned int n;
+ 415   2              Send_Task = 0;
+ 416   2              if(send_enable == 0) return;
+ 417   2              if(wifi_tx_ready) return;  /* 上一帧还没发完 */
+ 418   2      
+ 419   2              /* 拼传感器数据到 wifi_tx_buf */
+ 420   2              wifi_tx_buf[wi++] = 'S';
+ 421   2              wifi_tx_buf[wi++] = ',';
+ 422   2              n = (unsigned int)ds18b20;
+ 423   2              if(ds18b20 < 0)
+ 424   2              {
+ 425   3                  wifi_tx_buf[wi++] = '-';
+ 426   3                  n = (unsigned int)(-ds18b20);
+C51 COMPILER V9.56.0.0   MAIN                                                              11/03/2026 13:12:53 PAGE 8   
 
- 427   2              Uart_TxClear();
- 428   2              Uart_TxPutChar(&tx_i,'S');
- 429   2              Uart_TxPutChar(&tx_i,',');
- 430   2              if(ds18b20 < 0)
- 431   2              {
- 432   3                  Uart_TxPutChar(&tx_i,'-');
- 433   3                  Uart_TxPutUInt(&tx_i,(unsigned int)(-ds18b20));
- 434   3              }
- 435   2              else
- 436   2              {
- 437   3                  Uart_TxPutUInt(&tx_i,(unsigned int)ds18b20);
- 438   3              }
- 439   2              Uart_TxPutChar(&tx_i,',');
- 440   2              Uart_TxPutUInt(&tx_i,light_mv);
- 441   2              Uart_TxPutChar(&tx_i,',');
- 442   2              Uart_TxPutUInt(&tx_i,pot_mv);
- 443   2              Uart_TxPutChar(&tx_i,',');
- 444   2              Uart_TxPutUInt(&tx_i,ne555);
- 445   2              Uart_TxPutString(&tx_i,"\r\n");
- 446   2              Uart_TxStart();
- 447   2              tx_ok_flag = 1;
- 448   2          }
- 449   1      
- 450   1          /* 发送完成：帧已全部发出 → 计数 +1，L1 亮起 */
- 451   1          if(tx_ok_flag && B_TX1_busy == 255)
- 452   1          {
- 453   2              tx_ok_flag = 0;
- 454   2              upload_count++;
- 455   2              disp_dirty = 1;
- 456   2              tx_led_on = 1;
- 457   2              TX_LED_Task = 0;
- 458   2          }
- 459   1      }
-*** WARNING C280 IN LINE 284 OF main.c: 'frequency_delta': unreferenced local variable
- 460          
- 461          /********************************* LED 处理 ***********************************/
- 462          void Led_Proc(void)
- 463          {
- 464   1          led = 0x00;
- 465   1          led |= (unsigned char)(0x01 << mode);  /* L1~L5：显示界面 1~5 时对应灯常亮 */
- 466   1          if(tx_led_on) led |= 0x80;             /* L8：发送成功后亮 0.2 秒 */
- 467   1      }
- 468          
- 469          /********************************* 按键扫描 ***********************************/
- 470          unsigned char Key_Read(void)
- 471          {
- 472   1          P44=0;P42=1;P35=1;
- 473   1          P33=1;P32=1;
- 474   1          if(!P33)return 4;      /* S4：启动发送 */
- 475   1          else if(!P32)return 5; /* S5 */
- 476   1          P44=1;P42=0;
- 477   1          if(!P33)return 8;      /* S8 */
- 478   1          else if(!P32)return 9; /* S9 */
- 479   1          P42=1;P35=0;
- 480   1          if(!P33)return 12;     /* S12 */
- 481   1          else if(!P32)return 13;/* S13 */
- 482   1          return 0;
- 483   1      }
- 484          
- 485          void Key_Proc(void)
- 486          {
- 487   1          if(KEY_Task < KEY_TASK_TIME) return;
-C51 COMPILER V9.56.0.0   MAIN                                                              10/30/2026 20:47:17 PAGE 9   
+ 427   3              }
+ 428   2              /* 温度：省略前导零，至少输出一位 */
+ 429   2              {
+ 430   3                  bit started = 0;
+ 431   3                  unsigned int div;
+ 432   3                  for(div=10000; div>0; div/=10)
+ 433   3                  {
+ 434   4                      if(n >= div || started || div == 1)
+ 435   4                      {
+ 436   5                          started = 1;
+ 437   5                          wifi_tx_buf[wi++] = '0' + n/div;
+ 438   5                          n %= div;
+ 439   5                      }
+ 440   4                  }
+ 441   3              }
+ 442   2              wifi_tx_buf[wi++] = ',';
+ 443   2              /* 光敏 */
+ 444   2              n = light_mv;
+ 445   2              {
+ 446   3                  bit started = 0;
+ 447   3                  unsigned int div;
+ 448   3                  for(div=10000; div>0; div/=10)
+ 449   3                  {
+ 450   4                      if(n >= div || started || div == 1)
+ 451   4                      {
+ 452   5                          started = 1;
+ 453   5                          wifi_tx_buf[wi++] = '0' + n/div;
+ 454   5                          n %= div;
+ 455   5                      }
+ 456   4                  }
+ 457   3              }
+ 458   2              wifi_tx_buf[wi++] = ',';
+ 459   2              /* 电位器 */
+ 460   2              n = pot_mv;
+ 461   2              {
+ 462   3                  bit started = 0;
+ 463   3                  unsigned int div;
+ 464   3                  for(div=10000; div>0; div/=10)
+ 465   3                  {
+ 466   4                      if(n >= div || started || div == 1)
+ 467   4                      {
+ 468   5                          started = 1;
+ 469   5                          wifi_tx_buf[wi++] = '0' + n/div;
+ 470   5                          n %= div;
+ 471   5                      }
+ 472   4                  }
+ 473   3              }
+ 474   2              wifi_tx_buf[wi++] = ',';
+ 475   2              /* 频率 */
+ 476   2              n = ne555;
+ 477   2              {
+ 478   3                  bit started = 0;
+ 479   3                  unsigned int div;
+ 480   3                  for(div=10000; div>0; div/=10)
+ 481   3                  {
+ 482   4                      if(n >= div || started || div == 1)
+ 483   4                      {
+ 484   5                          started = 1;
+ 485   5                          wifi_tx_buf[wi++] = '0' + n/div;
+ 486   5                          n %= div;
+ 487   5                      }
+ 488   4                  }
+C51 COMPILER V9.56.0.0   MAIN                                                              11/03/2026 13:12:53 PAGE 9   
 
- 488   1          KEY_Task = 0;
- 489   1      
- 490   1          key_val = Key_Read();
- 491   1          key_down = key_val & (key_val ^ key_old);
- 492   1          key_old = key_val;
- 493   1      
- 494   1          if(key_down == 4)          /* S4：界面 1~5 循环切换 */
- 495   1          {
- 496   2              mode++;
- 497   2              if(mode > 4) mode = 0;
- 498   2              disp_dirty = 1;
- 499   2          }
- 500   1          else if(key_down == 8)     /* S8：按一次后开始发送 */
+ 489   3              }
+ 490   2              wifi_tx_buf[wi++] = '\r';
+ 491   2              wifi_tx_buf[wi++] = '\n';
+ 492   2              wifi_tx_buf[wi] = 0;
+ 493   2              wifi_tx_len = wi;
+ 494   2              wifi_tx_ready = 1;
+ 495   2              upload_count++;
+ 496   2              disp_dirty = 1;
+ 497   2          }
+ 498   1      
+ 499   1          /* 发送完成：帧已全部发出 → 计数 +1，L1 亮起 */
+ 500   1          if(tx_ok_flag && B_TX1_busy == 255)
  501   1          {
- 502   2              send_enable = 1;
- 503   2              Send_Task = SEND_TASK_TIME;   /* 立即触发第一帧 */
- 504   2          }
- 505   1      }
- 506          
- 507          
- 508          void uart_0(void) interrupt 4
- 509          {
- 510   1          unsigned char rx_byte;
- 511   1      
- 512   1          if(RI)
- 513   1          {
- 514   2              rx_byte = SBUF;
- 515   2              RI = 0;
- 516   2              if(B_RX1_flag == 0)
- 517   2              {
- 518   3                  if(B_RX1_Con < RX1_LENGTH-1)
- 519   3                  {
- 520   4                      RX1_Buffer[B_RX1_Con] = rx_byte;
- 521   4                      B_RX1_Con++;
- 522   4                      UART_Idle_Task = 0;
- 523   4                  }
- 524   3                  else
- 525   3                  {
- 526   4                      B_RX1_flag = 2;
- 527   4                  }
- 528   3              }
- 529   2          }
- 530   1      
- 531   1          if(TI)
- 532   1          {
- 533   2              TI = 0;
- 534   2              if(B_TX1_busy != 255 && TX1_Buffer[B_TX1_busy] != '\0')
- 535   2              {
- 536   3                  SBUF = TX1_Buffer[B_TX1_busy];
- 537   3                  B_TX1_busy++;
- 538   3              }
- 539   2              else
- 540   2              {
- 541   3                  B_TX1_busy = 255;
- 542   3              }
- 543   2          }
- 544   1      }
- 545          
- 546          /********************************* PCA 中断 ***********************************/
- 547          void CCP_IRQHandler(void) interrupt 7
- 548          {
- 549   1          if(CCF1)                 // 1ms 系统节拍
-C51 COMPILER V9.56.0.0   MAIN                                                              10/30/2026 20:47:17 PAGE 10  
+ 502   2              tx_ok_flag = 0;
+ 503   2              upload_count++;
+ 504   2              disp_dirty = 1;
+ 505   2              tx_led_on = 1;
+ 506   2              TX_LED_Task = 0;
+ 507   2          }
+ 508   1      }
+*** WARNING C280 IN LINE 286 OF main.c: 'tx_i': unreferenced local variable
+*** WARNING C280 IN LINE 290 OF main.c: 'frequency_delta': unreferenced local variable
+ 509          
+ 510          /********************************* LED 处理 ***********************************/
+ 511          void Led_Proc(void)
+ 512          {
+ 513   1          led = 0x00;
+ 514   1          led |= (unsigned char)(0x01 << mode);  /* L1~L5：显示界面 1~5 时对应灯常亮 */
+ 515   1          if(tx_led_on) led |= 0x80;             /* L8：发送成功后亮 0.2 秒 */
+ 516   1      }
+ 517          
+ 518          /********************************* 按键扫描 ***********************************/
+ 519          unsigned char Key_Read(void)
+ 520          {
+ 521   1          P44=0;P42=1;P35=1;
+ 522   1          P33=1;P32=1;
+ 523   1          if(!P33)return 4;      /* S4：启动发送 */
+ 524   1          else if(!P32)return 5; /* S5 */
+ 525   1          P44=1;P42=0;
+ 526   1          if(!P33)return 8;      /* S8 */
+ 527   1          else if(!P32)return 9; /* S9 */
+ 528   1          P42=1;P35=0;
+ 529   1          if(!P33)return 12;     /* S12 */
+ 530   1          else if(!P32)return 13;/* S13 */
+ 531   1          return 0;
+ 532   1      }
+ 533          
+ 534          void Key_Proc(void)
+ 535          {
+ 536   1          if(KEY_Task < KEY_TASK_TIME) return;
+ 537   1          KEY_Task = 0;
+ 538   1      
+ 539   1          key_val = Key_Read();
+ 540   1          key_down = key_val & (key_val ^ key_old);
+ 541   1          key_old = key_val;
+ 542   1      
+ 543   1          if(key_down == 4)          /* S4：界面 1~5 循环切换 */
+ 544   1          {
+ 545   2              mode++;
+ 546   2              if(mode > 5) mode = 0;
+ 547   2              disp_dirty = 1;
+ 548   2          }
+C51 COMPILER V9.56.0.0   MAIN                                                              11/03/2026 13:12:53 PAGE 10  
 
+ 549   1          else if(key_down == 8)     /* S8：按一次后开始发送 */
  550   1          {
- 551   2              CCF1 = 0;
- 552   2              CCAP1L = TIME_1;
- 553   2              CCAP1H = TIME_1 >> 8;
- 554   2              TIME_1 += TIME_CCAP1;
- 555   2      
- 556   2              if(PCF8591_Task < PCF8591_TASK_TIME) PCF8591_Task++;
- 557   2              if(DS18B20_Task < DS18B20_TASK_TIME) DS18B20_Task++;
- 558   2              if(NE555_Task < NE555_TASK_TIME) NE555_Task++;
- 559   2              if(Send_Task < SEND_TASK_TIME) Send_Task++;
- 560   2              if(KEY_Task < KEY_TASK_TIME) KEY_Task++;
- 561   2      
- 562   2              if(!esp_handshake_done)
- 563   2              {
- 564   3                  if(esp_timer == 1000) esp_at_pending = 1;
- 565   3                  esp_timer++;
- 566   3                  if(esp_timer >= 5000) esp_handshake_done = 1;
- 567   3              }
- 568   2      
- 569   2              if(tx_led_on)
- 570   2              {
- 571   3                  if(TX_LED_Task < LED_BLINK_TIME) TX_LED_Task++;
- 572   3                  else
- 573   3                  {
- 574   4                      TX_LED_Task = 0;
- 575   4                      tx_led_on = 0;
+ 551   2              send_enable = 1;
+ 552   2              Send_Task = SEND_TASK_TIME;   /* 立即触发第一帧 */
+ 553   2          }
+ 554   1      }
+ 555          
+ 556          
+ 557          void uart_0(void) interrupt 4
+ 558          {
+ 559   1          unsigned char rx_byte;
+ 560   1      
+ 561   1          if(RI)
+ 562   1          {
+ 563   2              rx_byte = SBUF;
+ 564   2              RI = 0;
+ 565   2              if(B_RX1_flag == 0)
+ 566   2              {
+ 567   3                  if(B_RX1_Con < RX1_LENGTH-1)
+ 568   3                  {
+ 569   4                      RX1_Buffer[B_RX1_Con] = rx_byte;
+ 570   4                      B_RX1_Con++;
+ 571   4                      UART_Idle_Task = 0;
+ 572   4                  }
+ 573   3                  else
+ 574   3                  {
+ 575   4                      B_RX1_flag = 2;
  576   4                  }
  577   3              }
- 578   2      
- 579   2              /* 串口不定长接收判帧：10ms 无新字节认为一帧接收完成 */
- 580   2              if(B_RX1_Con != 0 && B_RX1_flag == 0)
- 581   2              {
- 582   3                  if(UART_Idle_Task < UART_IDLE_TIME) UART_Idle_Task++;
- 583   3                  else B_RX1_flag = 1;
- 584   3              }
- 585   2          }
- 586   1      
- 587   1          if(CCF2)                 // 显示刷新
- 588   1          {
- 589   2              CCF2 = 0;
- 590   2              CCAP2L = TIME_2;
- 591   2              CCAP2H = TIME_2 >> 8;
- 592   2              TIME_2 += TIME_CCAP2;
- 593   2      
- 594   2              HC573_Write(4,~led);
- 595   2              HC573_Write(7,0xff);
- 596   2              HC573_Write(6,1 << (SEG_Count % 8));
- 597   2              HC573_Write(7,Code[seg[SEG_Count % 8]]);
- 598   2              SEG_Count++;
- 599   2              HC573_Write(5,b_and_r);          // 继电器/蜂鸣器：bit4=继电器，bit6=蜂鸣器
- 600   2          }
- 601   1      }
- 602          
- 603          /********************************* 串口接收处理 ********************************
- 604           * 双向控制：命令帧由桥通过串口下发，10ms 空闲判帧结束，主循环解析执行。
- 605           * 命令表：? → OK；R1/R0 → 继电器开/关；B1/B0 → 蜂鸣器开/关。
- 606           * 执行后回 OK；命令不识别回 ERROR。继电器/蜂鸣器改影子变量 b_and_r，
- 607           * 由 CCF2 中断统一写入 74HC573 通道 5（bit4=继电器，bit6=蜂鸣器）。
- 608           ******************************************************************************/
- 609          void Uart_ClearRxBuffer(void)
- 610          {
- 611   1          unsigned char i;
-C51 COMPILER V9.56.0.0   MAIN                                                              10/30/2026 20:47:17 PAGE 11  
+ 578   2          }
+ 579   1      
+ 580   1          if(TI)
+ 581   1          {
+ 582   2              TI = 0;
+ 583   2              if(B_TX1_busy != 255 && TX1_Buffer[B_TX1_busy] != '\0')
+ 584   2              {
+ 585   3                  SBUF = TX1_Buffer[B_TX1_busy];
+ 586   3                  B_TX1_busy++;
+ 587   3              }
+ 588   2              else
+ 589   2              {
+ 590   3                  B_TX1_busy = 255;
+ 591   3              }
+ 592   2          }
+ 593   1      }
+ 594          
+ 595          /********************************* PCA 中断 ***********************************/
+ 596          void CCP_IRQHandler(void) interrupt 7
+ 597          {
+ 598   1          if(CCF1)                 // 1ms 系统节拍
+ 599   1          {
+ 600   2              CCF1 = 0;
+ 601   2              CCAP1L = TIME_1;
+ 602   2              CCAP1H = TIME_1 >> 8;
+ 603   2              TIME_1 += TIME_CCAP1;
+ 604   2      
+ 605   2              if(PCF8591_Task < PCF8591_TASK_TIME) PCF8591_Task++;
+ 606   2              if(DS18B20_Task < DS18B20_TASK_TIME) DS18B20_Task++;
+ 607   2              if(NE555_Task < NE555_TASK_TIME) NE555_Task++;
+ 608   2              if(Send_Task < SEND_TASK_TIME) Send_Task++;
+ 609   2              if(KEY_Task < KEY_TASK_TIME) KEY_Task++;
+ 610   2      
+C51 COMPILER V9.56.0.0   MAIN                                                              11/03/2026 13:12:53 PAGE 11  
 
- 612   1          for(i=0;i<RX1_LENGTH;i++) RX1_Buffer[i] = 0;
- 613   1          B_RX1_Con = 0;
- 614   1          UART_Idle_Task = 0;
- 615   1          B_RX1_flag = 0;
- 616   1      }
- 617          
- 618          void Uart_Proc(void)
- 619          {
- 620   1          unsigned char rx_len;
- 621   1          unsigned char frame_state;
- 622   1      
- 623   1          frame_state = B_RX1_flag;
- 624   1          if(frame_state == 0) return;
- 625   1      
- 626   1          rx_len = B_RX1_Con;
- 627   1          while(rx_len > 0 && (RX1_Buffer[rx_len-1] == '\r' || RX1_Buffer[rx_len-1] == '\n'))
- 628   1          {
- 629   2              rx_len--;
- 630   2          }
- 631   1          RX1_Buffer[rx_len] = '\0';
- 632   1      
- 633   1          if(frame_state == 2)
- 634   1              Uart_SendString("ERROR\r\n");
- 635   1          else if(rx_len > 0)
- 636   1              Uart_ParseOneCommand(0,rx_len-1,1);
- 637   1          else
- 638   1              Uart_SendString("ERROR\r\n");
- 639   1      
- 640   1          Uart_ClearRxBuffer();
- 641   1      }
- 642          
- 643          bit Uart_ParseOneCommand(unsigned char start,unsigned char end,unsigned char reply_enable)
- 644          {
- 645   1          unsigned char len;
- 646   1      
- 647   1          if(end < start) return 0;
- 648   1          len = end - start + 1;
- 649   1      
- 650   1          /* 通信测试：? → OK */
- 651   1          if(len == 1 && RX1_Buffer[start] == '?')
- 652   1          {
- 653   2              if(reply_enable) Uart_SendString("OK\r\n");
- 654   2              return 1;
- 655   2          }
- 656   1          /* R1/R0：继电器开/关（b_and_r bit4） */
- 657   1          else if(len == 2 && RX1_Buffer[start] == 'R')
- 658   1          {
- 659   2              if(RX1_Buffer[start+1] == '1')
- 660   2              {
- 661   3                  b_and_r |= 0x10;          /* 继电器吸合 */
- 662   3                  if(reply_enable) Uart_SendString("OK\r\n");
- 663   3                  return 1;
- 664   3              }
- 665   2              else if(RX1_Buffer[start+1] == '0')
- 666   2              {
- 667   3                  b_and_r &= ~0x10;         /* 继电器释放 */
- 668   3                  if(reply_enable) Uart_SendString("OK\r\n");
- 669   3                  return 1;
- 670   3              }
- 671   2          }
- 672   1          /* B1/B0：蜂鸣器开/关（b_and_r bit6） */
- 673   1          else if(len == 2 && RX1_Buffer[start] == 'B')
-C51 COMPILER V9.56.0.0   MAIN                                                              10/30/2026 20:47:17 PAGE 12  
+ 611   2              if(tx_led_on)
+ 612   2              {
+ 613   3                  if(TX_LED_Task < LED_BLINK_TIME) TX_LED_Task++;
+ 614   3                  else
+ 615   3                  {
+ 616   4                      TX_LED_Task = 0;
+ 617   4                      tx_led_on = 0;
+ 618   4                  }
+ 619   3              }
+ 620   2      
+ 621   2              /* 串口不定长接收判帧：10ms 无新字节认为一帧接收完成 */
+ 622   2              if(1) { /* WiFi 模式：持续接收，不判帧结束 */ } else if(B_RX1_Con != 0 && B_RX1_flag == 0)
+ 623   2              {
+ 624   3                  if(UART_Idle_Task < UART_IDLE_TIME) UART_Idle_Task++;
+ 625   3                  else B_RX1_flag = 1;
+ 626   3              }
+ 627   2          }
+ 628   1      
+ 629   1          if(CCF2)                 // 显示刷新
+ 630   1          {
+ 631   2              CCF2 = 0;
+ 632   2              CCAP2L = TIME_2;
+ 633   2              CCAP2H = TIME_2 >> 8;
+ 634   2              TIME_2 += TIME_CCAP2;
+ 635   2      
+ 636   2              HC573_Write(4,~led);
+ 637   2              HC573_Write(7,0xff);
+ 638   2              HC573_Write(6,1 << (SEG_Count % 8));
+ 639   2              HC573_Write(7,Code[seg[SEG_Count % 8]]);
+ 640   2              SEG_Count++;
+ 641   2              HC573_Write(5,b_and_r);          // 继电器/蜂鸣器：bit4=继电器，bit6=蜂鸣器
+ 642   2          }
+ 643   1      }
+ 644          
+ 645          /********************************* 串口接收处理 ********************************
+ 646           * 双向控制：命令帧由桥通过串口下发，10ms 空闲判帧结束，主循环解析执行。
+ 647           * 命令表：? → OK；R1/R0 → 继电器开/关；B1/B0 → 蜂鸣器开/关。
+ 648           * 执行后回 OK；命令不识别回 ERROR。继电器/蜂鸣器改影子变量 b_and_r，
+ 649           * 由 CCF2 中断统一写入 74HC573 通道 5（bit4=继电器，bit6=蜂鸣器）。
+ 650           ******************************************************************************/
+ 651          /********************************* WiFi 状态机 *********************************/
+ 652          bit FindInRx(char *sub)
+ 653          {
+ 654   1          unsigned char i, j;
+ 655   1          for(i = 0; i + 2 < B_RX1_Con; i++)
+ 656   1          {
+ 657   2              for(j = 0; sub[j] != 0; j++)
+ 658   2              {
+ 659   3                  if(RX1_Buffer[i+j] != sub[j]) break;
+ 660   3              }
+ 661   2              if(sub[j] == 0) return 1;
+ 662   2          }
+ 663   1          return 0;
+ 664   1      }
+ 665          
+ 666          void WiFi_Proc(void)
+ 667          {
+ 668   1          wifi_timer++;
+ 669   1          if(wifi_state == 0)
+ 670   1          {
+ 671   2              if(wifi_timer >= 1000)
+ 672   2              {
+C51 COMPILER V9.56.0.0   MAIN                                                              11/03/2026 13:12:53 PAGE 12  
 
- 674   1          {
- 675   2              if(RX1_Buffer[start+1] == '1')
- 676   2              {
- 677   3                  b_and_r |= 0x40;          /* 蜂鸣器鸣响 */
- 678   3                  if(reply_enable) Uart_SendString("OK\r\n");
- 679   3                  return 1;
- 680   3              }
- 681   2              else if(RX1_Buffer[start+1] == '0')
+ 673   3                  wifi_timer = 0;
+ 674   3                  B_RX1_Con = 0; B_RX1_flag = 0; UART_Idle_Task = 0;
+ 675   3                  Uart_SendString("AT\r\n");
+ 676   3                  wifi_state = 1;
+ 677   3              }
+ 678   2          }
+ 679   1          else if(wifi_state == 1)
+ 680   1          {
+ 681   2              if(FindInRx("OK"))
  682   2              {
- 683   3                  b_and_r &= ~0x40;         /* 蜂鸣器关闭 */
- 684   3                  if(reply_enable) Uart_SendString("OK\r\n");
- 685   3                  return 1;
- 686   3              }
- 687   2          }
- 688   1      
- 689   1          if(reply_enable) Uart_SendString("ERROR\r\n");
- 690   1          return 0;
- 691   1      }
- 692          
- 693          /********************************* 串口发送函数 ********************************/
- 694          void Uart_SendString(char *str)
- 695          {
- 696   1          unsigned char i = 0;
- 697   1      
- 698   1          if(B_TX1_busy != 255) return;
- 699   1          Uart_TxClear();
- 700   1          while(str[i] != '\0' && i < TX1_LENGTH-1)
- 701   1          {
- 702   2              TX1_Buffer[i] = str[i];
- 703   2              i++;
- 704   2          }
- 705   1          TX1_Buffer[i] = '\0';
- 706   1          Uart_TxStart();
- 707   1      }
- 708          
- 709          void Uart_TxClear(void)
- 710          {
- 711   1          unsigned char i;
- 712   1          for(i=0;i<TX1_LENGTH;i++) TX1_Buffer[i] = 0;
- 713   1      }
- 714          
- 715          void Uart_TxStart(void)
- 716          {
- 717   1          if(B_TX1_busy != 255) return;
- 718   1          if(TX1_Buffer[0] == '\0') return;
- 719   1          SBUF = TX1_Buffer[0];
- 720   1          B_TX1_busy = 1;
- 721   1      }
- 722          
- 723          void Uart_TxPutChar(unsigned char *idx,char dat)
- 724          {
- 725   1          if(*idx < TX1_LENGTH-1)
- 726   1          {
- 727   2              TX1_Buffer[*idx] = dat;
- 728   2              (*idx)++;
- 729   2              TX1_Buffer[*idx] = '\0';
- 730   2          }
- 731   1      }
- 732          
- 733          void Uart_TxPutString(unsigned char *idx,char *str)
- 734          {
- 735   1          while(*str != '\0')
-C51 COMPILER V9.56.0.0   MAIN                                                              10/30/2026 20:47:17 PAGE 13  
+ 683   3                  wifi_timer = 0;
+ 684   3                  B_RX1_Con = 0; B_RX1_flag = 0; UART_Idle_Task = 0;
+ 685   3                  Uart_SendString("AT+CWMODE=1\r\n");
+ 686   3                  wifi_state = 2;
+ 687   3              }
+ 688   2              else if(wifi_timer >= 3000) wifi_state = 0;
+ 689   2          }
+ 690   1          else if(wifi_state == 2)
+ 691   1          {
+ 692   2              if(FindInRx("OK"))
+ 693   2              {
+ 694   3                  wifi_timer = 0;
+ 695   3                  B_RX1_Con = 0; B_RX1_flag = 0; UART_Idle_Task = 0;
+ 696   3                  Uart_SendString("AT+CWJAP=\"Xiaomi 15\",\"machunjie\"\r\n");
+ 697   3                  wifi_state = 3;
+ 698   3              }
+ 699   2              else if(wifi_timer >= 3000) wifi_state = 0;
+ 700   2          }
+ 701   1          else if(wifi_state == 3)
+ 702   1          {
+ 703   2              if(FindInRx("WIFI GOT IP"))
+ 704   2              {
+ 705   3                  wifi_state = 4;
+ 706   3              }
+ 707   2              else if(wifi_timer >= 15000) wifi_state = 0;
+ 708   2          }
+ 709   1          else if(wifi_state == 4)
+ 710   1          {
+ 711   2              if(wifi_timer >= 500)
+ 712   2              {
+ 713   3                  wifi_timer = 0;
+ 714   3                  B_RX1_Con = 0; B_RX1_flag = 0; UART_Idle_Task = 0;
+ 715   3                  Uart_SendString("AT+CIPMUX=0\r\n");
+ 716   3                  wifi_state = 9;
+ 717   3              }
+ 718   2          }
+ 719   1          else if(wifi_state == 9)
+ 720   1          {
+ 721   2              if(FindInRx("OK"))
+ 722   2              {
+ 723   3                  wifi_timer = 0;
+ 724   3                  B_RX1_Con = 0; B_RX1_flag = 0; UART_Idle_Task = 0;
+ 725   3                  Uart_SendString("AT+CIPSTART=\"TCP\",\"172.16.49.111\",8888\r\n");
+ 726   3                  wifi_state = 7;
+ 727   3              }
+ 728   2              else if(wifi_timer >= 3000) wifi_state = 4;
+ 729   2          }
+ 730   1          else if(wifi_state == 7)
+ 731   1          {
+ 732   2              if(FindInRx("CONNECT"))
+ 733   2              {
+ 734   3                  wifi_connected = 1;
+C51 COMPILER V9.56.0.0   MAIN                                                              11/03/2026 13:12:53 PAGE 13  
 
- 736   1          {
- 737   2              Uart_TxPutChar(idx,*str);
- 738   2              str++;
- 739   2          }
- 740   1      }
- 741          
- 742          void Uart_TxPutUInt(unsigned char *idx,unsigned int dat)
- 743          {
- 744   1          bit started = 0;
- 745   1          unsigned int div;
- 746   1      
- 747   1          for(div=10000; div>0; div/=10)
- 748   1          {
- 749   2              if(dat >= div || started || div == 1)
- 750   2              {
- 751   3                  started = 1;
- 752   3                  Uart_TxPutChar(idx,dat/div+'0');
- 753   3                  dat %= div;
- 754   3              }
- 755   2          }
- 756   1      }
- 757          
- 758          /********************************* 定时器初始化 ********************************/
- 759          void Timer0Init(void)
- 760          {
- 761   1          AUXR |= 0x80;
- 762   1          TMOD &= 0xF0;
- 763   1          TMOD |= 0x04;
- 764   1          TL0 = 0;
- 765   1          TH0 = 0;
- 766   1          TF0 = 0;
- 767   1          TR0 = 1;
- 768   1      }
- 769          
- 770          void Timer1Init(void)
- 771          {
- 772   1          AUXR &= 0xBF;
- 773   1          TMOD &= 0x0F;
- 774   1          TL1 = 0x00;
- 775   1          TH1 = 0x00;
- 776   1          TF1 = 0;
- 777   1          TR1 = 0;
- 778   1          PCA_TIME_init();
- 779   1      }
- 780          
- 781          void PCA_TIME_init(void)
- 782          {
- 783   1          P_SW1 &= 0xCF;
- 784   1          CCAPM0 = 0x00;
- 785   1          PPCA = 1;
- 786   1          CMOD = 0x00;
- 787   1          CCON = 0x00;
- 788   1          CH = 0;
- 789   1          CL = 0;
- 790   1      
- 791   1          CCAP1L = TIME_1;
- 792   1          CCAP1H = TIME_1 >> 8;
- 793   1          CCAPM1 = 0x49;
- 794   1          TIME_1 += TIME_CCAP1;
- 795   1      
- 796   1          CCAP2L = TIME_2;
- 797   1          CCAP2H = TIME_2 >> 8;
-C51 COMPILER V9.56.0.0   MAIN                                                              10/30/2026 20:47:17 PAGE 14  
+ 735   3                  wifi_state = 10;
+ 736   3              }
+ 737   2              else if(wifi_timer >= 8000) wifi_state = 4;
+ 738   2          }
+ 739   1          else if(wifi_state == 10)  /* TCP 已连，空闲 */
+ 740   1          {
+ 741   2              if(wifi_tx_ready && B_TX1_busy == 255)
+ 742   2              {
+ 743   3                  unsigned char len_str[4];
+ 744   3                  unsigned char n = wifi_tx_len;
+ 745   3                  unsigned char idx = 0;
+ 746   3                  wifi_tx_ready = 0;
+ 747   3                  wifi_tx_timer = 0;
+ 748   3                  B_RX1_Con = 0; B_RX1_flag = 0; UART_Idle_Task = 0;
+ 749   3                  /* 把长度转成字符串 */
+ 750   3                  if(n >= 100) { len_str[idx++] = '1'; n -= 100; }
+ 751   3                  if(n >= 10 || idx > 0) { len_str[idx++] = '0' + n/10; n %= 10; }
+ 752   3                  len_str[idx++] = '0' + n;
+ 753   3                  len_str[idx++] = 0;
+ 754   3                  /* 发 AT+CIPSEND=长度 */
+ 755   3                  Uart_SendString("AT+CIPSEND=");
+ 756   3                  /* 简化：先存长度到临时变量，下次发 */
+ 757   3                  wifi_tx_len = wifi_tx_len;  /* 保留 */
+ 758   3                  wifi_state = 11;
+ 759   3              }
+ 760   2          }
+ 761   1          else if(wifi_state == 11)  /* 发长度数字 + 换行 */
+ 762   1          {
+ 763   2              wifi_tx_timer++;
+ 764   2              if(wifi_tx_timer >= 50)
+ 765   2              {
+ 766   3                  unsigned char n = wifi_tx_len;
+ 767   3                  wifi_tx_timer = 0;
+ 768   3                  /* 直接发长度数字（用 SBUF 逐个发） */
+ 769   3                  if(n >= 100) { SBUF = '1'; while(!TI); TI=0; n-=100; }
+ 770   3                  if(n >= 10) { SBUF = '0' + n/10; while(!TI); TI=0; n%=10; }
+ 771   3                  SBUF = '0' + n; while(!TI); TI=0;
+ 772   3                  SBUF = '\r'; while(!TI); TI=0;
+ 773   3                  SBUF = '\n'; while(!TI); TI=0;
+ 774   3                  wifi_state = 12;
+ 775   3              }
+ 776   2          }
+ 777   1          else if(wifi_state == 12)  /* 等 100ms 后发数据 */
+ 778   1          {
+ 779   2              wifi_tx_timer++;
+ 780   2              if(wifi_tx_timer >= 100)
+ 781   2              {
+ 782   3                  wifi_tx_timer = 0;
+ 783   3                  B_RX1_Con = 0; B_RX1_flag = 0; UART_Idle_Task = 0;
+ 784   3                  Uart_SendString(wifi_tx_buf);
+ 785   3                  wifi_state = 13;
+ 786   3              }
+ 787   2          }
+ 788   1          else if(wifi_state == 13)  /* 等 SEND OK */
+ 789   1          {
+ 790   2              wifi_tx_timer++;
+ 791   2              if(FindInRx("SEND OK"))
+ 792   2              {
+ 793   3                  wifi_tx_timer = 0;
+ 794   3                  B_RX1_Con = 0; B_RX1_flag = 0; UART_Idle_Task = 0;
+ 795   3                  wifi_state = 10; tx_ok_flag = 1; disp_dirty = 1;
+ 796   3              }
+C51 COMPILER V9.56.0.0   MAIN                                                              11/03/2026 13:12:53 PAGE 14  
 
- 798   1          CCAPM2 = 0x49;
- 799   1          TIME_2 += TIME_CCAP2;
- 800   1      
- 801   1          CR = 1;
- 802   1      }
- 803          
- 804          /********************************* 温度换算 ************************************/
- 805          long int DS18B20_ToIntC(unsigned int raw)
- 806          {
- 807   1          /* 返回温度×100，例 2706 = 27.06℃（DS18B20 每 LSB = 0.0625℃） */
- 808   1          if(raw & 0xF000)    /* 负温度（12 位补码） */
- 809   1          {
- 810   2              return -((long int)((0x10000 - raw) & 0xFFFF) * 625 / 100);
- 811   2          }
- 812   1          return (long int)raw * 625 / 100;
- 813   1      }
+ 797   2              else if(wifi_tx_timer >= 5000) wifi_state = 10;
+ 798   2          }
+ 799   1      }
+ 800          
+ 801          void Uart_ClearRxBuffer(void)
+ 802          {
+ 803   1          unsigned char i;
+ 804   1          for(i=0;i<RX1_LENGTH;i++) RX1_Buffer[i] = 0;
+ 805   1          B_RX1_Con = 0;
+ 806   1          UART_Idle_Task = 0;
+ 807   1          B_RX1_flag = 0;
+ 808   1      }
+ 809          
+ 810          bit FindInRx2(char *sub)
+ 811          {
+ 812   1          unsigned char i, j;
+ 813   1          for(i = 0; i + 2 < B_RX1_Con; i++)
+ 814   1          {
+ 815   2              for(j = 0; sub[j] != 0; j++)
+ 816   2              {
+ 817   3                  if(RX1_Buffer[i+j] != sub[j]) break;
+ 818   3              }
+ 819   2              if(sub[j] == 0) return 1;
+ 820   2          }
+ 821   1          return 0;
+ 822   1      }
+ 823          
+ 824          void Uart_Proc(void)
+ 825          {
+ 826   1          if(wifi_state < 10) return;
+ 827   1          if(B_RX1_Con < 2) return;
+ 828   1      
+ 829   1          if(FindInRx2("R1"))
+ 830   1          {
+ 831   2              b_and_r |= 0x10;
+ 832   2              HC573_Write(5, b_and_r);
+ 833   2              Uart_ClearRxBuffer();
+ 834   2              return;
+ 835   2          }
+ 836   1          if(FindInRx2("R0"))
+ 837   1          {
+ 838   2              b_and_r &= ~0x10;
+ 839   2              HC573_Write(5, b_and_r);
+ 840   2              Uart_ClearRxBuffer();
+ 841   2              return;
+ 842   2          }
+ 843   1          if(FindInRx2("B1"))
+ 844   1          {
+ 845   2              b_and_r |= 0x40;
+ 846   2              HC573_Write(5, b_and_r);
+ 847   2              Uart_ClearRxBuffer();
+ 848   2              return;
+ 849   2          }
+ 850   1          if(FindInRx2("B0"))
+ 851   1          {
+ 852   2              b_and_r &= ~0x40;
+ 853   2              HC573_Write(5, b_and_r);
+ 854   2              Uart_ClearRxBuffer();
+ 855   2              return;
+ 856   2          }
+ 857   1      
+ 858   1          if(B_RX1_Con >= RX1_LENGTH - 10) Uart_ClearRxBuffer();
+C51 COMPILER V9.56.0.0   MAIN                                                              11/03/2026 13:12:53 PAGE 15  
+
+ 859   1      }
+ 860          
+ 861          bit Uart_ParseOneCommand(unsigned char start,unsigned char end,unsigned char reply_enable)
+ 862          {
+ 863   1          unsigned char len;
+ 864   1      
+ 865   1          if(end < start) return 0;
+ 866   1          len = end - start + 1;
+ 867   1      
+ 868   1          /* 通信测试：? → OK */
+ 869   1          if(len == 1 && RX1_Buffer[start] == '?')
+ 870   1          {
+ 871   2              if(reply_enable) Uart_SendString("OK\r\n");
+ 872   2              return 1;
+ 873   2          }
+ 874   1          /* R1/R0：继电器开/关（b_and_r bit4） */
+ 875   1          else if(len == 2 && RX1_Buffer[start] == 'R')
+ 876   1          {
+ 877   2              if(RX1_Buffer[start+1] == '1')
+ 878   2              {
+ 879   3                  b_and_r |= 0x10;          /* 继电器吸合 */
+ 880   3                  if(reply_enable) Uart_SendString("OK\r\n");
+ 881   3                  return 1;
+ 882   3              }
+ 883   2              else if(RX1_Buffer[start+1] == '0')
+ 884   2              {
+ 885   3                  b_and_r &= ~0x10;         /* 继电器释放 */
+ 886   3                  if(reply_enable) Uart_SendString("OK\r\n");
+ 887   3                  return 1;
+ 888   3              }
+ 889   2          }
+ 890   1          /* B1/B0：蜂鸣器开/关（b_and_r bit6） */
+ 891   1          else if(len == 2 && RX1_Buffer[start] == 'B')
+ 892   1          {
+ 893   2              if(RX1_Buffer[start+1] == '1')
+ 894   2              {
+ 895   3                  b_and_r |= 0x40;          /* 蜂鸣器鸣响 */
+ 896   3                  if(reply_enable) Uart_SendString("OK\r\n");
+ 897   3                  return 1;
+ 898   3              }
+ 899   2              else if(RX1_Buffer[start+1] == '0')
+ 900   2              {
+ 901   3                  b_and_r &= ~0x40;         /* 蜂鸣器关闭 */
+ 902   3                  if(reply_enable) Uart_SendString("OK\r\n");
+ 903   3                  return 1;
+ 904   3              }
+ 905   2          }
+ 906   1      
+ 907   1          if(reply_enable) Uart_SendString("ERROR\r\n");
+ 908   1          return 0;
+ 909   1      }
+ 910          
+ 911          /********************************* 串口发送函数 ********************************/
+ 912          void Uart_SendString(char *str)
+ 913          {
+ 914   1          unsigned char i = 0;
+ 915   1      
+ 916   1          if(B_TX1_busy != 255) return;
+ 917   1          Uart_TxClear();
+ 918   1          while(str[i] != '\0' && i < TX1_LENGTH-1)
+ 919   1          {
+ 920   2              TX1_Buffer[i] = str[i];
+C51 COMPILER V9.56.0.0   MAIN                                                              11/03/2026 13:12:53 PAGE 16  
+
+ 921   2              i++;
+ 922   2          }
+ 923   1          TX1_Buffer[i] = '\0';
+ 924   1          Uart_TxStart();
+ 925   1      }
+ 926          
+ 927          void Uart_TxClear(void)
+ 928          {
+ 929   1          unsigned char i;
+ 930   1          for(i=0;i<TX1_LENGTH;i++) TX1_Buffer[i] = 0;
+ 931   1      }
+ 932          
+ 933          void Uart_TxStart(void)
+ 934          {
+ 935   1          if(B_TX1_busy != 255) return;
+ 936   1          if(TX1_Buffer[0] == '\0') return;
+ 937   1          SBUF = TX1_Buffer[0];
+ 938   1          B_TX1_busy = 1;
+ 939   1      }
+ 940          
+ 941          void Uart_TxPutChar(unsigned char *idx,char dat)
+ 942          {
+ 943   1          if(*idx < TX1_LENGTH-1)
+ 944   1          {
+ 945   2              TX1_Buffer[*idx] = dat;
+ 946   2              (*idx)++;
+ 947   2              TX1_Buffer[*idx] = '\0';
+ 948   2          }
+ 949   1      }
+ 950          
+ 951          void Uart_TxPutString(unsigned char *idx,char *str)
+ 952          {
+ 953   1          while(*str != '\0')
+ 954   1          {
+ 955   2              Uart_TxPutChar(idx,*str);
+ 956   2              str++;
+ 957   2          }
+ 958   1      }
+ 959          
+ 960          void Uart_TxPutUInt(unsigned char *idx,unsigned int dat)
+ 961          {
+ 962   1          bit started = 0;
+ 963   1          unsigned int div;
+ 964   1      
+ 965   1          for(div=10000; div>0; div/=10)
+ 966   1          {
+ 967   2              if(dat >= div || started || div == 1)
+ 968   2              {
+ 969   3                  started = 1;
+ 970   3                  Uart_TxPutChar(idx,dat/div+'0');
+ 971   3                  dat %= div;
+ 972   3              }
+ 973   2          }
+ 974   1      }
+ 975          
+ 976          /********************************* 定时器初始化 ********************************/
+ 977          void Timer0Init(void)
+ 978          {
+ 979   1          AUXR |= 0x80;
+ 980   1          TMOD &= 0xF0;
+ 981   1          TMOD |= 0x04;
+ 982   1          TL0 = 0;
+C51 COMPILER V9.56.0.0   MAIN                                                              11/03/2026 13:12:53 PAGE 17  
+
+ 983   1          TH0 = 0;
+ 984   1          TF0 = 0;
+ 985   1          TR0 = 1;
+ 986   1      }
+ 987          
+ 988          void Timer1Init(void)
+ 989          {
+ 990   1          AUXR &= 0xBF;
+ 991   1          TMOD &= 0x0F;
+ 992   1          TL1 = 0x00;
+ 993   1          TH1 = 0x00;
+ 994   1          TF1 = 0;
+ 995   1          TR1 = 0;
+ 996   1          PCA_TIME_init();
+ 997   1      }
+ 998          
+ 999          void PCA_TIME_init(void)
+1000          {
+1001   1          P_SW1 &= 0xCF;
+1002   1          CCAPM0 = 0x00;
+1003   1          PPCA = 1;
+1004   1          CMOD = 0x00;
+1005   1          CCON = 0x00;
+1006   1          CH = 0;
+1007   1          CL = 0;
+1008   1      
+1009   1          CCAP1L = TIME_1;
+1010   1          CCAP1H = TIME_1 >> 8;
+1011   1          CCAPM1 = 0x49;
+1012   1          TIME_1 += TIME_CCAP1;
+1013   1      
+1014   1          CCAP2L = TIME_2;
+1015   1          CCAP2H = TIME_2 >> 8;
+1016   1          CCAPM2 = 0x49;
+1017   1          TIME_2 += TIME_CCAP2;
+1018   1      
+1019   1          CR = 1;
+1020   1      }
+1021          
+1022          /********************************* 温度换算 ************************************/
+1023          long int DS18B20_ToIntC(unsigned int raw)
+1024          {
+1025   1          /* 返回温度×100，例 2706 = 27.06℃（DS18B20 每 LSB = 0.0625℃） */
+1026   1          if(raw & 0xF000)    /* 负温度（12 位补码） */
+1027   1          {
+1028   2              return -((long int)((0x10000 - raw) & 0xFFFF) * 625 / 100);
+1029   2          }
+1030   1          return (long int)raw * 625 / 100;
+1031   1      }
+*** WARNING C294 IN LINE 624 OF main.c: unreachable code
 
 
 MODULE INFORMATION:   STATIC OVERLAYABLE
-   CODE SIZE        =   2832    ----
-   CONSTANT SIZE    =     59    ----
-   XDATA SIZE       =    160    ----
+   CODE SIZE        =   4228    ----
+   CONSTANT SIZE    =    215    ----
+   XDATA SIZE       =    246    ----
    PDATA SIZE       =   ----    ----
-   DATA SIZE        =     69      55
+   DATA SIZE        =     67      72
    IDATA SIZE       =   ----    ----
-   BIT SIZE         =      9       2
+   BIT SIZE         =      8       3
 END OF MODULE INFORMATION.
 
 
-C51 COMPILATION COMPLETE.  1 WARNING(S),  0 ERROR(S)
+C51 COMPILATION COMPLETE.  3 WARNING(S),  0 ERROR(S)

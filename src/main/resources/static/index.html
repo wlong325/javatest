@@ -2,259 +2,240 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CT107D 环境监测台</title>
-<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
-<style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-        font-family: "Microsoft YaHei", sans-serif;
-        background: #0f1420;
-        color: #e6edf7;
-        min-height: 100vh;
-    }
-    .header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 18px 30px;
-        background: rgba(255,255,255,0.04);
-        border-bottom: 1px solid rgba(255,255,255,0.08);
-    }
-    .header h1 { font-size: 22px; letter-spacing: 1px; }
-    .header h1 span { color: #4da3ff; }
-    .status { font-size: 13px; color: #7d8aa0; }
-    .status .dot {
-        display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-        background: #f43f5e; margin-right: 6px; vertical-align: middle;
-    }
-    .status.online .dot { background: #22c55e; }
-    .cards {
-        display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
-        padding: 20px 30px;
-    }
-    .card {
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.09);
-        border-radius: 10px; padding: 16px 20px;
-    }
-    .card .label { font-size: 13px; color: #7d8aa0; margin-bottom: 6px; }
-    .card .value { font-size: 32px; font-weight: bold; }
-    .card .value small { font-size: 14px; color: #7d8aa0; font-weight: normal; margin-left: 4px; }
-    .card.temp .value { color: #fbbf24; }
-    .card.light .value { color: #34d399; }
-    .card.pot .value { color: #60a5fa; }
-    .card.freq .value { color: #f472b6; }
-    .charts {
-        display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
-        padding: 0 30px 20px 30px;
-    }
-    .chart-box {
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.09);
-        border-radius: 10px; padding: 10px;
-    }
-    .chart { width: 100%; height: 260px; }
-    .table-box {
-        margin: 0 30px 30px 30px;
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.09);
-        border-radius: 10px; overflow: hidden;
-    }
-    .control-box {
-        margin: 0 30px 20px 30px;
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.09);
-        border-radius: 10px; padding: 14px 20px;
-        display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
-    }
-    .control-box h2 { font-size: 15px; color: #c3d0e2; margin-right: 6px; }
-    .ctrl-group { display: flex; align-items: center; gap: 8px; }
-    .ctrl-label { font-size: 13px; color: #7d8aa0; }
-    .btn { padding: 6px 18px; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; color: #fff; }
-    .btn-on { background: #22c55e; }
-    .btn-on:hover { background: #16a34a; }
-    .btn-off { background: #f43f5e; }
-    .btn-off:hover { background: #e11d48; }
-    .ctrl-status { font-size: 13px; color: #7d8aa0; margin-left: auto; }
-    .table-box h2 { font-size: 15px; padding: 14px 20px; color: #c3d0e2; border-bottom: 1px solid rgba(255,255,255,0.08); }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { padding: 10px 20px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); }
-    th { color: #7d8aa0; font-weight: normal; }
-    tr:hover td { background: rgba(255,255,255,0.03); }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>嵌入式综合环境监测台</title>
+<link rel="stylesheet" href="assets/app.css">
+<script>
+/* 窄屏全屏适配：按 375 设计宽度等比缩放，避免露边与闪动 */
+(function(){
+  var root = document.documentElement, last = -1;
+  function fit(){
+    var w = window.innerWidth, h = window.innerHeight;
+    if (w > 520) { root.style.removeProperty('--ms'); last = -1; return; }
+    var s = Math.round((h >= w ? w / 375 : h / 812) * 10000) / 10000;
+    if (s === last) return;
+    last = s;
+    root.style.setProperty('--ms', s);
+  }
+  window.__fitDevice = fit;
+  fit();
+  window.addEventListener('resize', fit);
+  window.addEventListener('orientationchange', function(){ setTimeout(fit,120); });
+})();
+</script>
 </head>
 <body>
 
-<div class="header">
-    <h1>CT107D <span>环境监测台</span></h1>
-    <div class="status" id="status"><span class="dot"></span>等待数据</div>
+<div class="phone" id="phone">
+  <div class="viewport">
+
+    <!-- ================= 页面一：设备 ================= -->
+    <section class="page is-active" id="page-device">
+
+      <div class="dev-head">
+        <div class="title-row">
+          <button class="dev-switch" id="btnSwitch">
+            <span class="dev-dot" id="devDot"></span>
+            <span class="dev-name" id="devName">CT107D-V40</span>
+            <svg class="chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9.5l6 6 6-6"/></svg>
+          </button>
+          <div class="conn-pill" id="connPill"><span class="dot"></span><span id="connText">已连接</span></div>
+        </div>
+        <div class="dev-sub" id="devSub">
+          <span>在线</span><span class="sep"></span><span id="subTime">等待数据</span>
+        </div>
+      </div>
+
+      <div class="hero">
+        <img class="hero-img" id="heroImg" src="assets/board-ct107d.webp" alt="CT107D-V40 开发板">
+        <div class="hero-tag" id="heroTag"><span class="dot"></span><span id="heroTagText">运行中</span></div>
+      </div>
+
+      <!-- 有数据的设备 -->
+      <div id="devLive">
+        <div class="sec-head">
+          <h2>实时数据</h2>
+          <span class="sec-meta">最近 1 分钟</span>
+        </div>
+        <div class="grid" id="metricGrid"></div>
+
+        <div class="sec-head">
+          <h2>板载控制</h2>
+          <span class="sec-meta" id="ctrlMeta">经串口桥下发</span>
+        </div>
+        <div class="ctrl-card">
+          <div class="ctrl-row">
+            <span class="c-ico relay">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7" width="17" height="10" rx="2"/><path d="M7.5 7V4.5M12 7V4.5M16.5 7V4.5M7.5 17v2.5M12 17v2.5M16.5 17v2.5"/></svg>
+            </span>
+            <div class="c-txt">
+              <p class="c-name">继电器</p>
+              <p class="c-state" id="relayState">已关闭 · 未操作</p>
+            </div>
+            <button class="switch" id="swRelay" role="switch" aria-checked="false" aria-label="继电器开关"><span class="knob"></span></button>
+          </div>
+          <div class="ctrl-row">
+            <span class="c-ico buzzer">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6.5 9H3v6h3.5L11 19z"/><path d="M15.5 8.8a4.6 4.6 0 010 6.4"/><path d="M18.5 6a8.4 8.4 0 010 12"/></svg>
+            </span>
+            <div class="c-txt">
+              <p class="c-name">蜂鸣器</p>
+              <p class="c-state" id="buzzerState">已关闭 · 未操作</p>
+            </div>
+            <button class="switch" id="swBuzzer" role="switch" aria-checked="false" aria-label="蜂鸣器开关"><span class="knob"></span></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 未接入的板子 -->
+      <div id="devPending" hidden>
+        <div class="sec-head">
+          <h2>实时数据</h2>
+          <span class="sec-meta">尚未接入</span>
+        </div>
+        <div class="empty-wrap">
+          <div class="empty">
+            <span class="empty-ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1.9"/><path d="M8.4 8.4a5.1 5.1 0 000 7.2M15.6 8.4a5.1 5.1 0 010 7.2"/><path d="M5.4 5.4a9.3 9.3 0 000 13.2M18.6 5.4a9.3 9.3 0 010 13.2"/></svg>
+            </span>
+            <p class="empty-title">数据采集中，敬请期待</p>
+            <p class="empty-sub">CT117E-M4 的传感器通道还在开发，接入后这里会显示同样的四项指标。</p>
+            <div class="empty-chips">
+              <span class="empty-chip">温度</span>
+              <span class="empty-chip">光照</span>
+              <span class="empty-chip">电位器</span>
+              <span class="empty-chip">频率</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ================= 页面二：个人 ================= -->
+    <section class="page" id="page-me">
+
+      <div class="me-head">
+        <div class="me-card">
+          <img class="avatar" src="assets/avatar.jpg" alt="头像">
+          <div class="me-info">
+            <p class="me-name">Wlong</p>
+            <p class="me-phone">17663985139</p>
+          </div>
+          <span class="me-badge" id="meBadge">1 台在线</span>
+        </div>
+
+        <div class="stats">
+          <div class="stat">
+            <p class="stat-label">采样间隔</p>
+            <p class="stat-val">2<small>s</small></p>
+          </div>
+          <div class="stat">
+            <p class="stat-label">已载入</p>
+            <p class="stat-val" id="statCount">0<small>条</small></p>
+          </div>
+          <div class="stat">
+            <p class="stat-label">在线设备</p>
+            <p class="stat-val">1<small>/2</small></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec-head">
+        <h2>设备概览</h2>
+        <span class="sec-meta">点击切换</span>
+      </div>
+      <div class="dev-cards" id="meDevCards"></div>
+
+      <div class="menu">
+        <button class="menu-row" id="menuDevices">
+          <span class="menu-ico" style="background:rgba(0,133,255,.10);color:#0085FF">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 3.5v3.5M14 3.5v3.5M10 17v3.5M14 17v3.5M3.5 10H7M3.5 14H7M17 10h3.5M17 14h3.5"/></svg>
+          </span>
+          <span class="menu-label">我的设备</span>
+          <span class="menu-val">2 台</span>
+          <svg class="menu-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5l6.5 6.5-6.5 6.5"/></svg>
+        </button>
+
+        <button class="menu-row" id="menuRecords">
+          <span class="menu-ico" style="background:rgba(0,181,120,.10);color:#00B578">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="3.5" width="15" height="17" rx="2.5"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+          </span>
+          <span class="menu-label">数据记录</span>
+          <span class="menu-val" id="menuRecCount">0 条</span>
+          <svg class="menu-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5l6.5 6.5-6.5 6.5"/></svg>
+        </button>
+
+        <button class="menu-row" id="menuGuide">
+          <span class="menu-ico" style="background:rgba(255,143,31,.10);color:#FF8F1F">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 016.5 3H19v18H6.5A2.5 2.5 0 004 23.5z"/><path d="M4 19.5c0-1.4 1.1-2.5 2.5-2.5H19"/></svg>
+          </span>
+          <span class="menu-label">使用说明</span>
+          <svg class="menu-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5l6.5 6.5-6.5 6.5"/></svg>
+        </button>
+
+        <button class="menu-row" id="menuAbout">
+          <span class="menu-ico" style="background:rgba(124,92,252,.10);color:#7C5CFC">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 11.2v5.4"/><circle cx="12" cy="8" r=".9" fill="currentColor" stroke="none"/></svg>
+          </span>
+          <span class="menu-label">关于监测台</span>
+          <svg class="menu-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5l6.5 6.5-6.5 6.5"/></svg>
+        </button>
+      </div>
+
+      <p class="ver">嵌入式综合环境监测台<br>CT107D &amp; CT117E · 蓝桥杯实训项目</p>
+    </section>
+
+    <!-- ================= 二级页：数据记录 ================= -->
+    <div class="subpage" id="pageRecords">
+      <div class="sub-head">
+        <button class="back-btn" id="btnBackRecords" aria-label="返回">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5L8 12l6.5 6.5"/></svg>
+        </button>
+        <h2>数据记录</h2>
+        <span class="count" id="recCount">0 条</span>
+      </div>
+      <div class="rec-table">
+        <div class="rec-row head">
+          <span>时间</span><span class="v">温度℃</span><span class="v">光照V</span><span class="v">电位器V</span><span class="v">频率Hz</span>
+        </div>
+        <div class="rec-list" id="recList"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ================= 底部 Tab ================= -->
+  <nav class="tabbar">
+    <button class="tab-item is-active" data-tab="device">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 3.6v3.4M14 3.6v3.4M10 17v3.4M14 17v3.4M3.6 10H7M3.6 14H7M17 10h3.4M17 14h3.4"/></svg>
+      <span class="tab-label">单片机</span>
+    </button>
+    <button class="tab-item" data-tab="me">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.7"/><path d="M4.6 20c0-3.7 3.3-5.7 7.4-5.7s7.4 2 7.4 5.7"/></svg>
+      <span class="tab-label">个人</span>
+    </button>
+  </nav>
+
+  <!-- 遮罩与面板 -->
+  <div class="mask" id="mask"></div>
+
+  <div class="sheet" id="sheetDevices">
+    <div class="sheet-handle"></div>
+    <p class="sheet-title">切换设备 <span>2 台</span></p>
+    <div id="deviceList"></div>
+    <p class="sheet-tip">更多设备接入中</p>
+  </div>
+
+  <div class="sheet" id="sheetInfo">
+    <div class="sheet-handle"></div>
+    <p class="sheet-title" id="infoTitle">说明</p>
+    <div class="info-body" id="infoBody"></div>
+  </div>
+
+  <div class="toast" id="toast"></div>
 </div>
 
-<div class="cards">
-    <div class="card temp">
-        <div class="label">温度（DS18B20）</div>
-        <div class="value" id="v-temp">--<small>℃</small></div>
-    </div>
-    <div class="card light">
-        <div class="label">光照（光敏电阻）</div>
-        <div class="value" id="v-light">--<small>V</small></div>
-    </div>
-    <div class="card pot">
-        <div class="label">电位器电压</div>
-        <div class="value" id="v-pot">--<small>V</small></div>
-    </div>
-    <div class="card freq">
-        <div class="label">NE555 频率</div>
-        <div class="value" id="v-freq">--<small>Hz</small></div>
-    </div>
-</div>
-
-<div class="control-box">
-    <h2>板载控制</h2>
-    <div class="ctrl-group">
-        <span class="ctrl-label">继电器</span>
-        <button class="btn btn-on" onclick="sendCmd('relay','on')">开</button>
-        <button class="btn btn-off" onclick="sendCmd('relay','off')">关</button>
-    </div>
-    <div class="ctrl-group">
-        <span class="ctrl-label">蜂鸣器</span>
-        <button class="btn btn-on" onclick="sendCmd('buzzer','on')">开</button>
-        <button class="btn btn-off" onclick="sendCmd('buzzer','off')">关</button>
-    </div>
-    <div class="ctrl-status" id="dev-status">最近命令：无</div>
-</div>
-
-<div class="charts">
-    <div class="chart-box"><div class="chart" id="chart-temp"></div></div>
-    <div class="chart-box"><div class="chart" id="chart-light"></div></div>
-    <div class="chart-box"><div class="chart" id="chart-pot"></div></div>
-    <div class="chart-box"><div class="chart" id="chart-freq"></div></div>
-</div>
-
-<div class="table-box">
-    <h2>最近 10 条记录</h2>
-    <table>
-        <thead>
-            <tr><th>时间</th><th>温度 (℃)</th><th>光照 (V)</th><th>电位器 (V)</th><th>频率 (Hz)</th></tr>
-        </thead>
-        <tbody id="tb"></tbody>
-    </table>
-</div>
-
-<script>
-const CHARTS = [
-    { el: 'chart-temp', name: '温度', unit: '℃', field: 'temperature', color: '#fbbf24', min: 0, max: 40 },
-    { el: 'chart-light', name: '光照', unit: 'V', field: 'light', color: '#34d399', min: 0, max: 5 },
-    { el: 'chart-pot', name: '电位器', unit: 'V', field: 'pot', color: '#60a5fa', min: 0, max: 5 },
-    { el: 'chart-freq', name: '频率', unit: 'Hz', field: 'frequency', color: '#f472b6', min: 0, max: null },
-];
-
-const charts = {};
-for (const c of CHARTS) {
-    charts[c.field] = echarts.init(document.getElementById(c.el));
-    charts[c.field].setOption({
-        grid: { left: 50, right: 20, top: 30, bottom: 25 },
-        tooltip: { trigger: 'axis', backgroundColor: 'rgba(15,20,32,0.9)', borderColor: '#334155', textStyle: { color: '#e6edf7' } },
-        xAxis: { type: 'category', data: [], axisLine: { lineStyle: { color: '#334155' } }, axisLabel: { color: '#7d8aa0' } },
-        yAxis: { type: 'value', min: c.min, max: c.max, axisLabel: { color: '#7d8aa0' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,0.07)' } } },
-        series: [{
-            name: c.name + '(' + c.unit + ')', type: 'line', smooth: true, showSymbol: false,
-            data: [], lineStyle: { width: 2, color: c.color },
-            areaStyle: { opacity: 0.15, color: c.color },
-        }],
-    });
-}
-
-function fmtTime(t) {
-    const d = new Date(t);
-    const p = n => String(n).padStart(2, '0');
-    return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
-}
-
-function fmt(v, n) {
-    return v === null || v === undefined ? '--' : Number(v).toFixed(n === undefined ? 2 : n);
-}
-
-async function refresh() {
-    try {
-        const [latestRes, historyRes] = await Promise.all([
-            fetch('/api/sensor/latest'),
-            fetch('/api/sensor/history?limit=100'),
-        ]);
-        const latest = await latestRes.json();
-        const history = await historyRes.json();
-
-        // 状态
-        const st = document.getElementById('status');
-        if (latest && latest.temperature !== null) {
-            st.className = 'status online';
-            st.innerHTML = '<span class="dot"></span>在线 · 更新于 ' + fmtTime(latest.createTime);
-        }
-
-        // 最新数据卡片
-        document.getElementById('v-temp').innerHTML = fmt(latest && latest.temperature, 2) + '<small>℃</small>';
-        document.getElementById('v-light').innerHTML = fmt(latest && latest.light, 3) + '<small>V</small>';
-        document.getElementById('v-pot').innerHTML = fmt(latest && latest.pot, 3) + '<small>V</small>';
-        document.getElementById('v-freq').innerHTML = fmt(latest && latest.frequency, 0) + '<small>Hz</small>';
-
-        // 曲线
-        const times = history.map(d => fmtTime(d.createTime));
-        for (const c of CHARTS) {
-            charts[c.field].setOption({
-                xAxis: { data: times },
-                series: [{ data: history.map(d => d[c.field]) }],
-            });
-        }
-
-        // 最近 10 条表格
-        const rows = history.slice(-10).reverse();
-        document.getElementById('tb').innerHTML = rows.map(r =>
-            '<tr><td>' + fmtTime(r.createTime) + '</td>' +
-            '<td>' + fmt(r.temperature, 2) + '</td>' +
-            '<td>' + fmt(r.light, 3) + '</td>' +
-            '<td>' + fmt(r.pot, 3) + '</td>' +
-            '<td>' + fmt(r.frequency, 0) + '</td></tr>'
-        ).join('') || '<tr><td colspan="5" style="color:#7d8aa0">暂无数据，等板子上报…</td></tr>';
-    } catch (e) {
-        document.getElementById('status').innerHTML = '<span class="dot"></span>连接失败';
-    }
-}
-
-refresh();
-setInterval(refresh, 2000);
-
-// ===== 双向控制：命令下发 + 状态轮询 =====
-async function sendCmd(type, val) {
-    const body = {};
-    body[type] = val;
-    try {
-        const r = await fetch('/api/device/command', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-        const txt = await r.text();
-        document.getElementById('dev-status').innerHTML = '最近命令：' + txt;
-        refreshDeviceStatus();
-    } catch (e) {
-        document.getElementById('dev-status').innerHTML = '最近命令：发送失败';
-    }
-}
-
-async function refreshDeviceStatus() {
-    try {
-        const r = await fetch('/api/device/status');
-        const s = await r.json();
-        const timeTxt = s.time ? fmtTime(s.time) : '-';
-        const map = { PENDING: '待下发', SENT: '已下发串口' };
-        document.getElementById('dev-status').innerHTML =
-            '最近命令：' + (s.lastCommand || '无') +
-            ' · 状态：' + (map[s.status] || '-') + ' · ' + timeTxt;
-    } catch (e) { /* 后端未启动时静默 */ }
-}
-refreshDeviceStatus();
-setInterval(refreshDeviceStatus, 1000);
-</script>
+<script src="assets/app.js"></script>
 </body>
 </html>

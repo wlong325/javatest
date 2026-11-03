@@ -64,8 +64,16 @@ unsigned char adc_scan_step = 0;         // PCF8591 channel scan phase
 bit tx_ok_flag = 0;                  // 1 = 已发出一帧，等待发送完成
 bit tx_led_on = 0;                   // L8 点亮状态
 unsigned char TX_LED_Task = 0;       // L8 亮灯计时（LED_BLINK_TIME 后熄灭）
-unsigned char mode = 4;              // 显示界面 0~4（界面1~5），S4 切换，默认界面5
-long int disp_temp = 22;             // 显示用温度（×100），去抖后值
+unsigned char mode = 5;  /* 默认 WiFi 界面 */              // 显示界面 0~4（界面1~5），S4 切换，默认界面5
+long int disp_temp = 22;
+xdata unsigned char wifi_state = 0;
+xdata unsigned int  wifi_timer = 0;
+bit wifi_connected = 0;             /* WiFi TCP 是否已连 */
+xdata char wifi_tx_buf[80];
+bit wifi_tx_ready = 0;
+xdata unsigned char wifi_tx_len = 0;
+xdata unsigned int  wifi_tx_timer = 0;
+
 unsigned int disp_light = 0;         // 显示用光敏 mV（去抖后值）
 unsigned int disp_pot = 0;           // 显示用电位器 mV（去抖后值）
 bit disp_dirty = 1;                  // 1=显示内容有变化，需重算 seg[]（上电先算一次）
@@ -110,6 +118,10 @@ void Led_Proc(void);
 void Uart_SendString(char *str);
 void Uart_TxClear(void);
 void Uart_Proc(void);
+void WiFi_Proc(void);
+bit FindInRx(char *sub);
+
+
 void Uart_ClearRxBuffer(void);
 bit Uart_ParseOneCommand(unsigned char start,unsigned char end,unsigned char reply_enable);
 void Uart_TxStart(void);
@@ -143,6 +155,7 @@ void main(void)
         Key_Proc();
         Task_Proc();
         Led_Proc();
+        WiFi_Proc();
         Uart_Proc();
     }
 }
@@ -243,6 +256,15 @@ void Display_Proc(void)
         case 3:  /* 界面4：NE555 频率 Hz */
             Seg_ShowFixed(ne555, 8, 0, 1);
             break;
+        case 5:  /* 界面6：WiFi 状态 */
+            if(wifi_state == 10)
+                Seg_ShowFixed(7777, 4, 0, 1);
+            else if(wifi_state >= 4)
+                Seg_ShowFixed(8888, 4, 0, 1);
+            else
+                Seg_ShowFixed(1111, 4, 0, 1);
+            break;
+
         default: /* 界面5：上传成功次数 */
             Seg_ShowFixed(upload_count, 8, 0, 1);
             break;
@@ -388,32 +410,90 @@ void Task_Proc(void)
 
     if(Send_Task >= SEND_TASK_TIME)
     {
-        tx_i = 0;
+        unsigned char wi = 0;
+        unsigned int n;
         Send_Task = 0;
-        if(send_enable == 0) return;   /* 未按 S4：不上报 */
-        if(B_TX1_busy != 255) return;
+        if(send_enable == 0) return;
+        if(wifi_tx_ready) return;  /* 上一帧还没发完 */
 
-        Uart_TxClear();
-        Uart_TxPutChar(&tx_i,'S');
-        Uart_TxPutChar(&tx_i,',');
+        /* 拼传感器数据到 wifi_tx_buf */
+        wifi_tx_buf[wi++] = 'S';
+        wifi_tx_buf[wi++] = ',';
+        n = (unsigned int)ds18b20;
         if(ds18b20 < 0)
         {
-            Uart_TxPutChar(&tx_i,'-');
-            Uart_TxPutUInt(&tx_i,(unsigned int)(-ds18b20));
+            wifi_tx_buf[wi++] = '-';
+            n = (unsigned int)(-ds18b20);
         }
-        else
+        /* 温度：省略前导零，至少输出一位 */
         {
-            Uart_TxPutUInt(&tx_i,(unsigned int)ds18b20);
+            bit started = 0;
+            unsigned int div;
+            for(div=10000; div>0; div/=10)
+            {
+                if(n >= div || started || div == 1)
+                {
+                    started = 1;
+                    wifi_tx_buf[wi++] = '0' + n/div;
+                    n %= div;
+                }
+            }
         }
-        Uart_TxPutChar(&tx_i,',');
-        Uart_TxPutUInt(&tx_i,light_mv);
-        Uart_TxPutChar(&tx_i,',');
-        Uart_TxPutUInt(&tx_i,pot_mv);
-        Uart_TxPutChar(&tx_i,',');
-        Uart_TxPutUInt(&tx_i,ne555);
-        Uart_TxPutString(&tx_i,"\r\n");
-        Uart_TxStart();
-        tx_ok_flag = 1;
+        wifi_tx_buf[wi++] = ',';
+        /* 光敏 */
+        n = light_mv;
+        {
+            bit started = 0;
+            unsigned int div;
+            for(div=10000; div>0; div/=10)
+            {
+                if(n >= div || started || div == 1)
+                {
+                    started = 1;
+                    wifi_tx_buf[wi++] = '0' + n/div;
+                    n %= div;
+                }
+            }
+        }
+        wifi_tx_buf[wi++] = ',';
+        /* 电位器 */
+        n = pot_mv;
+        {
+            bit started = 0;
+            unsigned int div;
+            for(div=10000; div>0; div/=10)
+            {
+                if(n >= div || started || div == 1)
+                {
+                    started = 1;
+                    wifi_tx_buf[wi++] = '0' + n/div;
+                    n %= div;
+                }
+            }
+        }
+        wifi_tx_buf[wi++] = ',';
+        /* 频率 */
+        n = ne555;
+        {
+            bit started = 0;
+            unsigned int div;
+            for(div=10000; div>0; div/=10)
+            {
+                if(n >= div || started || div == 1)
+                {
+                    started = 1;
+                    wifi_tx_buf[wi++] = '0' + n/div;
+                    n %= div;
+                }
+            }
+        }
+        wifi_tx_buf[wi++] = '\r';
+        wifi_tx_buf[wi++] = '\n';
+        wifi_tx_buf[wi] = 0;
+        wifi_tx_len = wi;
+        wifi_tx_ready = 1;
+        upload_count++;
+        disp_dirty = 1;
     }
 
     /* 发送完成：帧已全部发出 → 计数 +1，L1 亮起 */
@@ -463,7 +543,7 @@ void Key_Proc(void)
     if(key_down == 4)          /* S4：界面 1~5 循环切换 */
     {
         mode++;
-        if(mode > 4) mode = 0;
+        if(mode > 5) mode = 0;
         disp_dirty = 1;
     }
     else if(key_down == 8)     /* S8：按一次后开始发送 */
@@ -539,7 +619,7 @@ void CCP_IRQHandler(void) interrupt 7
         }
 
         /* 串口不定长接收判帧：10ms 无新字节认为一帧接收完成 */
-        if(B_RX1_Con != 0 && B_RX1_flag == 0)
+        if(1) { /* WiFi 模式：持续接收，不判帧结束 */ } else if(B_RX1_Con != 0 && B_RX1_flag == 0)
         {
             if(UART_Idle_Task < UART_IDLE_TIME) UART_Idle_Task++;
             else B_RX1_flag = 1;
@@ -568,6 +648,156 @@ void CCP_IRQHandler(void) interrupt 7
  * 执行后回 OK；命令不识别回 ERROR。继电器/蜂鸣器改影子变量 b_and_r，
  * 由 CCF2 中断统一写入 74HC573 通道 5（bit4=继电器，bit6=蜂鸣器）。
  ******************************************************************************/
+/********************************* WiFi 状态机 *********************************/
+bit FindInRx(char *sub)
+{
+    unsigned char i, j;
+    for(i = 0; i + 2 < B_RX1_Con; i++)
+    {
+        for(j = 0; sub[j] != 0; j++)
+        {
+            if(RX1_Buffer[i+j] != sub[j]) break;
+        }
+        if(sub[j] == 0) return 1;
+    }
+    return 0;
+}
+
+void WiFi_Proc(void)
+{
+    wifi_timer++;
+    if(wifi_state == 0)
+    {
+        if(wifi_timer >= 1000)
+        {
+            wifi_timer = 0;
+            B_RX1_Con = 0; B_RX1_flag = 0; UART_Idle_Task = 0;
+            Uart_SendString("AT\r\n");
+            wifi_state = 1;
+        }
+    }
+    else if(wifi_state == 1)
+    {
+        if(FindInRx("OK"))
+        {
+            wifi_timer = 0;
+            B_RX1_Con = 0; B_RX1_flag = 0; UART_Idle_Task = 0;
+            Uart_SendString("AT+CWMODE=1\r\n");
+            wifi_state = 2;
+        }
+        else if(wifi_timer >= 3000) wifi_state = 0;
+    }
+    else if(wifi_state == 2)
+    {
+        if(FindInRx("OK"))
+        {
+            wifi_timer = 0;
+            B_RX1_Con = 0; B_RX1_flag = 0; UART_Idle_Task = 0;
+            Uart_SendString("AT+CWJAP=\"Xiaomi 15\",\"machunjie\"\r\n");
+            wifi_state = 3;
+        }
+        else if(wifi_timer >= 3000) wifi_state = 0;
+    }
+    else if(wifi_state == 3)
+    {
+        if(FindInRx("WIFI GOT IP"))
+        {
+            wifi_state = 4;
+        }
+        else if(wifi_timer >= 15000) wifi_state = 0;
+    }
+    else if(wifi_state == 4)
+    {
+        if(wifi_timer >= 500)
+        {
+            wifi_timer = 0;
+            B_RX1_Con = 0; B_RX1_flag = 0; UART_Idle_Task = 0;
+            Uart_SendString("AT+CIPMUX=0\r\n");
+            wifi_state = 9;
+        }
+    }
+    else if(wifi_state == 9)
+    {
+        if(FindInRx("OK"))
+        {
+            wifi_timer = 0;
+            B_RX1_Con = 0; B_RX1_flag = 0; UART_Idle_Task = 0;
+            Uart_SendString("AT+CIPSTART=\"TCP\",\"172.16.49.111\",8888\r\n");
+            wifi_state = 7;
+        }
+        else if(wifi_timer >= 3000) wifi_state = 4;
+    }
+    else if(wifi_state == 7)
+    {
+        if(FindInRx("CONNECT"))
+        {
+            wifi_connected = 1;
+            wifi_state = 10;
+        }
+        else if(wifi_timer >= 8000) wifi_state = 4;
+    }
+    else if(wifi_state == 10)  /* TCP 已连，空闲 */
+    {
+        if(wifi_tx_ready && B_TX1_busy == 255)
+        {
+            unsigned char len_str[4];
+            unsigned char n = wifi_tx_len;
+            unsigned char idx = 0;
+            wifi_tx_ready = 0;
+            wifi_tx_timer = 0;
+            B_RX1_Con = 0; B_RX1_flag = 0; UART_Idle_Task = 0;
+            /* 把长度转成字符串 */
+            if(n >= 100) { len_str[idx++] = '1'; n -= 100; }
+            if(n >= 10 || idx > 0) { len_str[idx++] = '0' + n/10; n %= 10; }
+            len_str[idx++] = '0' + n;
+            len_str[idx++] = 0;
+            /* 发 AT+CIPSEND=长度 */
+            Uart_SendString("AT+CIPSEND=");
+            /* 简化：先存长度到临时变量，下次发 */
+            wifi_tx_len = wifi_tx_len;  /* 保留 */
+            wifi_state = 11;
+        }
+    }
+    else if(wifi_state == 11)  /* 发长度数字 + 换行 */
+    {
+        wifi_tx_timer++;
+        if(wifi_tx_timer >= 50)
+        {
+            unsigned char n = wifi_tx_len;
+            wifi_tx_timer = 0;
+            /* 直接发长度数字（用 SBUF 逐个发） */
+            if(n >= 100) { SBUF = '1'; while(!TI); TI=0; n-=100; }
+            if(n >= 10) { SBUF = '0' + n/10; while(!TI); TI=0; n%=10; }
+            SBUF = '0' + n; while(!TI); TI=0;
+            SBUF = '\r'; while(!TI); TI=0;
+            SBUF = '\n'; while(!TI); TI=0;
+            wifi_state = 12;
+        }
+    }
+    else if(wifi_state == 12)  /* 等 100ms 后发数据 */
+    {
+        wifi_tx_timer++;
+        if(wifi_tx_timer >= 100)
+        {
+            wifi_tx_timer = 0;
+            B_RX1_Con = 0; B_RX1_flag = 0; UART_Idle_Task = 0;
+            Uart_SendString(wifi_tx_buf);
+            wifi_state = 13;
+        }
+    }
+    else if(wifi_state == 13)  /* 等 SEND OK */
+    {
+        wifi_tx_timer++;
+        if(FindInRx("SEND OK"))
+        {
+            wifi_tx_timer = 0;
+            B_RX1_Con = 0; B_RX1_flag = 0; UART_Idle_Task = 0;
+            wifi_state = 10; tx_ok_flag = 1; disp_dirty = 1;
+        }
+        else if(wifi_tx_timer >= 5000) wifi_state = 10;
+    }
+}
+
 void Uart_ClearRxBuffer(void)
 {
     unsigned char i;
@@ -577,29 +807,55 @@ void Uart_ClearRxBuffer(void)
     B_RX1_flag = 0;
 }
 
+bit FindInRx2(char *sub)
+{
+    unsigned char i, j;
+    for(i = 0; i + 2 < B_RX1_Con; i++)
+    {
+        for(j = 0; sub[j] != 0; j++)
+        {
+            if(RX1_Buffer[i+j] != sub[j]) break;
+        }
+        if(sub[j] == 0) return 1;
+    }
+    return 0;
+}
+
 void Uart_Proc(void)
 {
-    unsigned char rx_len;
-    unsigned char frame_state;
+    if(wifi_state < 10) return;
+    if(B_RX1_Con < 2) return;
 
-    frame_state = B_RX1_flag;
-    if(frame_state == 0) return;
-
-    rx_len = B_RX1_Con;
-    while(rx_len > 0 && (RX1_Buffer[rx_len-1] == '\r' || RX1_Buffer[rx_len-1] == '\n'))
+    if(FindInRx2("R1"))
     {
-        rx_len--;
+        b_and_r |= 0x10;
+        HC573_Write(5, b_and_r);
+        Uart_ClearRxBuffer();
+        return;
     }
-    RX1_Buffer[rx_len] = '\0';
+    if(FindInRx2("R0"))
+    {
+        b_and_r &= ~0x10;
+        HC573_Write(5, b_and_r);
+        Uart_ClearRxBuffer();
+        return;
+    }
+    if(FindInRx2("B1"))
+    {
+        b_and_r |= 0x40;
+        HC573_Write(5, b_and_r);
+        Uart_ClearRxBuffer();
+        return;
+    }
+    if(FindInRx2("B0"))
+    {
+        b_and_r &= ~0x40;
+        HC573_Write(5, b_and_r);
+        Uart_ClearRxBuffer();
+        return;
+    }
 
-    if(frame_state == 2)
-        Uart_SendString("ERROR\r\n");
-    else if(rx_len > 0)
-        Uart_ParseOneCommand(0,rx_len-1,1);
-    else
-        Uart_SendString("ERROR\r\n");
-
-    Uart_ClearRxBuffer();
+    if(B_RX1_Con >= RX1_LENGTH - 10) Uart_ClearRxBuffer();
 }
 
 bit Uart_ParseOneCommand(unsigned char start,unsigned char end,unsigned char reply_enable)
